@@ -1,0 +1,906 @@
+(* ===================================================================== *)
+(* Cork Language — Formal Grammar in EBNF                                *)
+(* ===================================================================== *)
+(* Cork is a high-level language that compiles to Commodore 64 machine   *)
+(* code. It blends C-style declarations with Smalltalk/ObjC-style       *)
+(* message passing. The colon is reserved exclusively for method calls   *)
+(* and declarations — it never appears in type annotations.              *)
+(*                                                                       *)
+(* Notation:                                                             *)
+(*   =     production rule definition                                    *)
+(*   |     alternatives                                                  *)
+(*   { }   repetition (zero or more)                                     *)
+(*   [ ]   optional (zero or one)                                        *)
+(*   ( )   grouping                                                      *)
+(*   " "   terminal string                                               *)
+(*   ;     end of production rule                                        *)
+(*   (* *) comment                                                       *)
+(* ===================================================================== *)
+
+
+(* ===================================================================== *)
+(* 1. PROGRAM STRUCTURE                                                  *)
+(* ===================================================================== *)
+
+(* A Cork program is a sequence of top-level declarations. Exactly one   *)
+(* scene must be marked "entry". Global declarations (variables,         *)
+(* resources, classes, etc.) live outside any scene and are always        *)
+(* resident in memory.                                                   *)
+
+program = { top_level_declaration } ;
+
+top_level_declaration = import_declaration
+                      | global_variable_declaration
+                      | resource_declaration
+                      | enum_declaration
+                      | class_declaration
+                      | abstract_class_declaration
+                      | interface_declaration
+                      | scene_declaration ;
+
+
+(* ===================================================================== *)
+(* 2. IMPORTS                                                            *)
+(* ===================================================================== *)
+
+(* Two forms: file imports for Cork source files, and library imports    *)
+(* for named library packages. Both are statement-level.                 *)
+
+import_declaration = file_import | library_import ;
+
+file_import = "import" string_literal ";" ;
+
+(* Library imports use dotted names, e.g., Cork.Math *)
+library_import = "import" qualified_name ";" ;
+
+qualified_name = identifier { "." identifier } ;
+
+
+(* ===================================================================== *)
+(* 3. TYPE SYSTEM                                                        *)
+(* ===================================================================== *)
+
+(* Cork has primitive types, built-in hardware types, user-defined       *)
+(* types (classes, enums), and array types. The "?" suffix makes any     *)
+(* type nullable. "var" is used for type inference and is only valid     *)
+(* in variable declarations, not as a standalone type.                   *)
+
+type = non_nullable_type [ "?" ] ;
+
+non_nullable_type = primitive_type
+                  | hardware_type
+                  | user_type
+                  | array_type ;
+
+primitive_type = "byte" | "sbyte" | "word" | "sword"
+               | "bool" | "fixed" | "string" ;
+
+(* Built-in hardware types — lowercase, always available, no imports.    *)
+(* These represent C64 hardware resources.                               *)
+hardware_type = "sprite" | "charset" | "music" | "sound" | "tilemap" ;
+
+(* User-defined type names (classes, enums, interfaces) *)
+user_type = identifier ;
+
+(* Fixed-size arrays: the size is a compile-time constant expression.    *)
+(* Written as Type[Size], e.g., byte[20] or Enemy[8].                   *)
+array_type = ( primitive_type | hardware_type | user_type ) "[" const_expression "]" ;
+
+
+(* ===================================================================== *)
+(* 4. DECLARATIONS — VARIABLES, CONSTANTS, RESOURCES                     *)
+(* ===================================================================== *)
+
+(* Variable declarations are C-style: type before name. "var" enables    *)
+(* type inference. No colons appear in declarations. "const" makes the   *)
+(* binding immutable.                                                    *)
+
+(* Global-scope variable declaration *)
+global_variable_declaration = variable_declaration ;
+
+(* Variable declaration — usable at global, scene, class, or local scope *)
+(* Four forms:                                                           *)
+(*   byte x = 5;              — explicit type, optional initializer      *)
+(*   var x = 5;               — inferred type, initializer required      *)
+(*   const byte MAX = 8;      — constant with explicit type              *)
+(*   const MAX = 8;           — constant with inferred type (no "var")   *)
+variable_declaration = typed_var_decl ";"
+                     | inferred_var_decl ";"
+                     | const_typed_decl ";"
+                     | const_inferred_decl ";" ;
+
+(* Explicit type: "byte x = 5;" or "Enemy? target = null;" *)
+typed_var_decl = type identifier [ "=" expression ] ;
+
+(* Inferred type: "var x = 5;" — initializer is required *)
+inferred_var_decl = "var" identifier "=" expression ;
+
+(* Constant with explicit type: "const byte MAX_LIVES = 3;" *)
+const_typed_decl = "const" type identifier "=" expression ;
+
+(* Constant with inferred type: "const MAX_ENEMIES = 8;" — no "var"     *)
+(* needed, the compiler infers the type from the initializer.            *)
+const_inferred_decl = "const" identifier "=" expression ;
+
+(* Resource import — binds a binary file to a hardware type.             *)
+(* e.g., charset font = import("font.bin");                              *)
+resource_declaration = hardware_type identifier "=" "import" "(" string_literal ")" ";" ;
+
+
+(* ===================================================================== *)
+(* 5. ENUMS                                                              *)
+(* ===================================================================== *)
+
+(* Standard enums and flags enums. Both require an explicit backing type *)
+(* specified after the colon. The "flags" keyword modifier enables       *)
+(* bitwise combination.                                                  *)
+
+(* Note: This is the ONE place where ":" appears outside of message      *)
+(* passing — in enum backing-type syntax. This follows the C#/Swift      *)
+(* convention and is syntactically unambiguous because it always appears  *)
+(* between the enum name and a primitive type keyword. In Cork, the      *)
+(* colon-means-invoke principle applies to method calls and declarations *)
+(* involving receiver/argument patterns, not to this inheritance-style   *)
+(* annotation which mirrors class inheritance syntax.                    *)
+
+enum_declaration = [ "flags" ] "enum" identifier ":" primitive_type
+                   "{" enum_member_list "}" ;
+
+enum_member_list = enum_member { "," enum_member } [ "," ] ;
+
+enum_member = identifier "=" expression ;
+
+
+(* ===================================================================== *)
+(* 6. CLASSES                                                            *)
+(* ===================================================================== *)
+
+(* Single inheritance, multiple interfaces. The base class or interface  *)
+(* list uses ":" after the class name, following C#/C++ convention.      *)
+(* This is syntactically distinct from message-passing colons because    *)
+(* it appears in a declaration header, not in a statement or expression. *)
+
+class_declaration = "class" identifier [ ":" class_parent_list ]
+                    "{" { class_member } "}" ;
+
+abstract_class_declaration = "abstract" "class" identifier [ ":" class_parent_list ]
+                             "{" { abstract_class_member } "}" ;
+
+(* Parent list: optional single base class, then interfaces *)
+class_parent_list = identifier { "," identifier } ;
+
+(* --- Class Members --- *)
+
+class_member = class_field
+             | class_property
+             | class_method
+             | class_constructor ;
+
+abstract_class_member = abstract_method
+                      | class_member ;
+
+(* Field: access modifier + type + name, optional initializer.           *)
+(* e.g., private byte health = 3;                                        *)
+(* Constants are also allowed: public const byte MAX = 8;                *)
+class_field = [ access_modifier ] ( typed_var_decl
+                                  | inferred_var_decl
+                                  | const_typed_decl
+                                  | const_inferred_decl ) ";" ;
+
+(* Property — two forms: auto-property and computed property *)
+class_property = [ access_modifier ] type identifier "{" property_body "}" ;
+
+(* Auto-property: "get; set;" or "get;" *)
+(* Computed property: "get { ... } set { ... }" or just "get { ... }" *)
+property_body = auto_property_body | computed_property_body ;
+
+auto_property_body = "get" ";" [ "set" ";" ] ;
+
+computed_property_body = property_getter [ property_setter ]
+                       | property_setter [ property_getter ] ;
+
+property_getter = "get" block ;
+
+(* In a setter, "value" is the implicit parameter name *)
+property_setter = "set" block ;
+
+(* --- Methods --- *)
+
+(* Methods use message-passing syntax for their signatures. The return   *)
+(* type is C-style (before the first selector segment). No "func"       *)
+(* keyword.                                                              *)
+(*                                                                       *)
+(* Method signature forms:                                               *)
+(*   update:                          — void, no args                    *)
+(*   takeDamage: (byte amount)        — void, one segment with one arg  *)
+(*   moveTo: (byte x) y: (byte y)    — void, two segments              *)
+(*   byte distanceFromX: (byte x) toY: (byte y)  — with return type    *)
+(*                                                                       *)
+(* The full method identity is the concatenation of its selector         *)
+(* segments: "distanceFromX:toY:"                                        *)
+
+class_method = [ access_modifier ] method_declaration ;
+
+method_declaration = [ type ] method_signature block ;
+
+(* Abstract methods have no body *)
+abstract_method = [ access_modifier ] "abstract" [ type ] method_signature ";" ;
+
+(* The method signature is the selector chain: one or more segments,     *)
+(* each ending with a colon. The first segment may have no parameter     *)
+(* (for no-arg methods like "update:") or may have one. Subsequent       *)
+(* segments always have a parameter.                                     *)
+(*                                                                       *)
+(* Grammar encoding:                                                     *)
+(*   No-arg method:     "update:"                                        *)
+(*   Single arg:        "takeDamage:" "(" type ident ")"                 *)
+(*   Multi-segment:     "moveTo:" "(" type ident ")" "y:" "(" type ")"  *)
+
+method_signature = method_first_segment { method_additional_segment } ;
+
+(* The first segment: a selector-colon, optionally followed by a param  *)
+method_first_segment = selector_with_colon [ parameter ] ;
+
+(* Additional segments: a selector-colon, always followed by a param    *)
+method_additional_segment = selector_with_colon parameter ;
+
+(* A selector is an identifier immediately followed by ":".              *)
+(* e.g., "moveTo:" or "update:" or "y:".                                 *)
+(* Lexically this is identifier + ":" with no intervening whitespace     *)
+(* in the selector name, but whitespace before the argument is allowed.  *)
+selector_with_colon = identifier ":" ;
+
+parameter = "(" type identifier ")" ;
+
+
+(* --- Constructors --- *)
+
+(* Constructors use "ctor" instead of a return type. The signature       *)
+(* follows the same message-passing pattern as methods.                  *)
+(*   ctor:                                       — no-arg constructor    *)
+(*   ctor withHealth: (byte h) atX: (byte x)     — named constructor    *)
+
+class_constructor = [ access_modifier ] constructor_declaration ;
+
+constructor_declaration = "ctor" constructor_signature block ;
+
+(* "ctor:" for no-arg, or "ctor" + segments for named constructors.      *)
+(* Note: A bare "ctor:" has no leading selector name before the colon — *)
+(* the "ctor" keyword itself acts as the base, and ":" signals no args.  *)
+(* For named constructors, the first segment is a named selector.        *)
+constructor_signature = ":" (* no-arg constructor *)
+                      | method_first_segment { method_additional_segment } ;
+
+
+(* --- Access Modifiers --- *)
+
+access_modifier = "public" | "private" | "protected" ;
+
+
+(* ===================================================================== *)
+(* 7. INTERFACES                                                         *)
+(* ===================================================================== *)
+
+(* Interfaces declare method signatures (no bodies) and property         *)
+(* signatures (auto-property style only). They may extend other          *)
+(* interfaces via ":" parent list.                                       *)
+
+interface_declaration = "interface" identifier [ ":" interface_parent_list ]
+                        "{" { interface_member } "}" ;
+
+interface_parent_list = identifier { "," identifier } ;
+
+interface_member = interface_method | interface_property ;
+
+(* Interface methods have no body — just a signature followed by ";" *)
+interface_method = [ type ] method_signature ";" ;
+
+(* Interface properties: type + name + auto-property accessors *)
+interface_property = type identifier "{" auto_property_body "}" ;
+
+
+(* ===================================================================== *)
+(* 8. SCENES                                                             *)
+(* ===================================================================== *)
+
+(* Scenes are the primary architectural unit. Exactly one must be marked *)
+(* "entry". A scene can contain: hardware blocks, resource declarations, *)
+(* sprite declarations, lifecycle blocks, variables, and methods.        *)
+
+scene_declaration = [ "entry" ] "scene" identifier "{" { scene_member } "}" ;
+
+scene_member = hardware_block
+             | scene_resource_declaration
+             | scene_sprite_declaration
+             | scene_variable_declaration
+             | scene_lifecycle_block
+             | scene_method ;
+
+(* --- Hardware Block --- *)
+
+(* Declarative configuration for VIC-II settings. Uses colon syntax      *)
+(* for key-value pairs. This is a declarative context — the colons here  *)
+(* are part of the hardware DSL, pairing property names to values.       *)
+
+hardware_block = "hardware" "{" { hardware_setting } "}" ;
+
+hardware_setting = identifier ":" expression ";" ;
+
+(* --- Scene Resources --- *)
+
+scene_resource_declaration = resource_declaration ;
+
+(* --- Scene Variables --- *)
+
+scene_variable_declaration = variable_declaration ;
+
+(* --- Sprite Declarations --- *)
+
+(* Sprites are declared with the "sprite" keyword followed by a name     *)
+(* and a block of property settings. This is a declarative construct     *)
+(* specific to scenes.                                                   *)
+
+scene_sprite_declaration = "sprite" identifier "{" { sprite_setting } "}" ;
+
+sprite_setting = identifier ":" expression ";" ;
+
+(* --- Lifecycle Blocks --- *)
+
+(* Lifecycle blocks are keywords, not methods. They represent the        *)
+(* scene's execution phases.                                             *)
+
+scene_lifecycle_block = enter_block
+                      | frame_block
+                      | relaxed_frame_block
+                      | raster_block
+                      | exit_block ;
+
+enter_block = "enter" block ;
+
+frame_block = "frame" block ;
+
+(* "relaxed frame" is a keyword modifier — the compiler warns instead   *)
+(* of erroring when the cycle budget might overrun.                      *)
+relaxed_frame_block = "relaxed" "frame" block ;
+
+(* Raster interrupt at a specific scanline. The compiler wires the IRQ.  *)
+(* Multiple raster blocks are allowed per scene.                         *)
+(* Syntax: raster(line: N) { ... }                                       *)
+(* The "line:" inside the parens is a fixed keyword, not a message send. *)
+raster_block = "raster" "(" "line" ":" expression ")" block ;
+
+exit_block = "exit" block ;
+
+(* --- Scene Methods --- *)
+
+(* Scene-private helper methods, same syntax as class methods but        *)
+(* without access modifiers.                                             *)
+scene_method = method_declaration ;
+
+
+(* ===================================================================== *)
+(* 9. STATEMENTS                                                         *)
+(* ===================================================================== *)
+
+(* Statements appear inside blocks (method bodies, lifecycle blocks,     *)
+(* control flow bodies, etc.).                                           *)
+
+block = "{" { statement } "}" ;
+
+statement = variable_declaration
+          | expression_statement
+          | assignment_statement
+          | message_send_statement
+          | if_statement
+          | while_statement
+          | for_statement
+          | for_each_statement
+          | switch_statement
+          | fallthrough_switch_statement
+          | go_statement
+          | return_statement
+          | break_statement ;
+
+(* --- Expression Statement --- *)
+
+(* A bare expression evaluated for its side effects. Terminated by ";".  *)
+expression_statement = expression ";" ;
+
+(* --- Assignment --- *)
+
+(* Assignment to an lvalue. Compound assignments included.               *)
+assignment_statement = lvalue assignment_operator expression ";" ;
+
+(* An lvalue is anything that can appear on the left side of assignment. *)
+(* This includes simple identifiers, chained property access (with dots),*)
+(* and array element access. These can be combined:                      *)
+(*   x                         — simple variable                         *)
+(*   this.x                    — field access                            *)
+(*   enemy.health              — property access                         *)
+(*   vic.border                — chained hardware access                 *)
+(*   enemies[i]                — array element                           *)
+(*   enemies[i].health         — array element property                  *)
+(* "this" can appear as the root of an lvalue for field assignment:      *)
+(*   this.x = 100;                                                       *)
+lvalue = ( identifier | "this" ) { "." identifier } [ "[" expression "]" ] { "." identifier } ;
+
+assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
+                    | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
+
+(* --- Message Send Statement --- *)
+
+(* A message send at statement level, terminated by ";".                 *)
+(* Examples:                                                             *)
+(*   player update:;                                                     *)
+(*   enemy moveTo: 100 y: 50;                                           *)
+(*   Music play: bgm;                                                    *)
+(*   enemy takeDamage: (weapon.power + bonus);                           *)
+(*   target?.takeDamage: 1;                                              *)
+(*                                                                       *)
+(* The receiver is an expression (identifier, property access, etc.).    *)
+(* This is followed by a selector chain with arguments.                  *)
+(*                                                                       *)
+(* Note on null-conditional sends: "target?.takeDamage:" is a safe send  *)
+(* that only executes if target is non-null.                             *)
+
+message_send_statement = message_send_expression ";" ;
+
+(* --- Control Flow --- *)
+
+if_statement = "if" "(" expression ")" block
+               { "else" "if" "(" expression ")" block }
+               [ "else" block ] ;
+
+while_statement = "while" "(" expression ")" block ;
+
+(* C-style for loop *)
+for_statement = "for" "(" for_init ";" expression ";" for_step ")" block ;
+
+for_init = typed_var_decl | inferred_var_decl | assignment_expression ;
+
+(* The step part is an assignment or standalone expression *)
+for_step = assignment_expression | expression ;
+
+assignment_expression = lvalue assignment_operator expression ;
+
+(* For-each iteration over a collection *)
+for_each_statement = "for" "(" identifier "in" expression ")" block ;
+
+(* Switch — no fallthrough. Each case is independent, no "break" needed. *)
+(* Supports both constant and expression cases.                          *)
+switch_statement = "switch" "(" expression ")" "{"
+                   { switch_case }
+                   [ default_case ]
+                   "}" ;
+
+switch_case = "case" expression ":" { statement } ;
+
+default_case = "default" ":" { statement } ;
+
+(* Fallthrough switch — C-style. Cases fall through unless "break" is    *)
+(* explicitly used.                                                      *)
+fallthrough_switch_statement = "fallthrough" "switch" "(" expression ")" "{"
+                               { fallthrough_case }
+                               [ default_case ]
+                               "}" ;
+
+fallthrough_case = "case" expression ":" { statement } ;
+
+(* Scene transition *)
+go_statement = "go" identifier ";" ;
+
+(* Return from a method *)
+return_statement = "return" [ expression ] ";" ;
+
+(* Break out of a fallthrough switch case *)
+break_statement = "break" ";" ;
+
+
+(* ===================================================================== *)
+(* 10. EXPRESSIONS                                                       *)
+(* ===================================================================== *)
+
+(* Expressions are defined with standard operator precedence, from       *)
+(* lowest to highest. Message sends in expression context require        *)
+(* parentheses to delimit them.                                          *)
+
+expression = logical_or_expression ;
+
+(* --- Logical Operators --- *)
+
+logical_or_expression = logical_and_expression { "||" logical_and_expression } ;
+
+logical_and_expression = bitwise_or_expression { "&&" bitwise_or_expression } ;
+
+(* --- Bitwise Operators --- *)
+
+bitwise_or_expression = bitwise_xor_expression { "|" bitwise_xor_expression } ;
+
+bitwise_xor_expression = bitwise_and_expression { "^" bitwise_and_expression } ;
+
+bitwise_and_expression = equality_expression { "&" equality_expression } ;
+
+(* --- Equality Operators --- *)
+
+equality_expression = relational_expression { ( "==" | "!=" ) relational_expression } ;
+
+(* --- Relational Operators --- *)
+
+relational_expression = shift_expression { ( "<" | ">" | "<=" | ">=" ) shift_expression } ;
+
+(* --- Shift Operators --- *)
+
+shift_expression = additive_expression { ( "<<" | ">>" ) additive_expression } ;
+
+(* --- Arithmetic Operators --- *)
+
+additive_expression = multiplicative_expression { ( "+" | "-" ) multiplicative_expression } ;
+
+multiplicative_expression = unary_expression { ( "*" | "/" | "%" ) unary_expression } ;
+
+(* --- Unary Operators --- *)
+
+unary_expression = ( "-" | "!" | "~" ) unary_expression
+                 | postfix_expression ;
+
+(* --- Postfix Expressions --- *)
+
+(* Postfix covers property access (dot), array indexing, and the         *)
+(* null-conditional operator "?.".                                       *)
+
+postfix_expression = primary_expression { postfix_operation } ;
+
+postfix_operation = "." identifier                   (* property/field access *)
+                  | "?." identifier                  (* null-conditional access *)
+                  | "[" expression "]" ;             (* array indexing *)
+
+(* --- Primary Expressions --- *)
+
+primary_expression = integer_literal
+                   | fixed_literal
+                   | string_literal
+                   | boolean_literal
+                   | null_literal
+                   | "this"                      (* self-reference in methods *)
+                   | identifier
+                   | new_expression
+                   | array_initializer
+                   | resource_import_expression
+                   | parenthesized_expression
+                   | parenthesized_message_send ;
+
+(* Array initializer — brace-enclosed list of expressions.               *)
+(* Used in const array declarations: const byte[256] table = { 0, 1, 2 }*)
+array_initializer = "{" expression { "," expression } [ "," ] "}" ;
+
+(* Resource import as an expression — used in sprite/hardware settings.   *)
+(* e.g., data: import("logo.spr");                                       *)
+resource_import_expression = "import" "(" string_literal ")" ;
+
+(* Parenthesized expression — standard grouping *)
+parenthesized_expression = "(" expression ")" ;
+
+(* Parenthesized message send — message sends in expression context      *)
+(* MUST be wrapped in parens to delimit them.                            *)
+(* e.g., (enemy distanceFrom: player) or (value clamp: 0 max: 255)      *)
+(*                                                                       *)
+(* This is what makes message sends unambiguous in expressions:          *)
+(* the parens tell the parser where the send starts and ends.            *)
+(*                                                                       *)
+(* Note: A parenthesized expression and a parenthesized message send     *)
+(* are disambiguated by the parser: if the content after the receiver    *)
+(* contains a selector-colon pattern, it is a message send; otherwise    *)
+(* it is a plain grouped expression.                                     *)
+parenthesized_message_send = "(" message_send_expression ")" ;
+
+(* --- Message Send Expression --- *)
+
+(* A message send has a receiver and a selector chain.                   *)
+(* The receiver is a postfix expression (identifier, property access,    *)
+(* etc.). The selector chain is one or more selector:argument pairs.     *)
+(*                                                                       *)
+(* No-arg sends:   receiver method:                                      *)
+(* With args:      receiver segment: arg segment: arg                    *)
+(*                                                                       *)
+(* In statement context, the send is terminated by ";".                  *)
+(* In expression context, it is delimited by "(" and ")".               *)
+(*                                                                       *)
+(* The receiver can also use "?." for null-conditional sends:            *)
+(*   target?.takeDamage: 1                                               *)
+
+message_send_expression = message_receiver message_selector_chain ;
+
+(* The receiver is a postfix expression. For null-conditional sends,     *)
+(* the "?." appears between the receiver and the first selector:         *)
+(*   target?.takeDamage: 1;  — only sends if target is non-null          *)
+(* Syntactically, the "?." replaces the whitespace between receiver      *)
+(* and selector. For normal sends, there is just whitespace.             *)
+message_receiver = postfix_expression [ "?." ] ;
+
+(* The selector chain: a first selector (which may have no arg for       *)
+(* no-arg methods) followed by zero or more additional selectors that    *)
+(* always have arguments.                                                *)
+message_selector_chain = message_first_selector { message_additional_selector } ;
+
+(* The first selector may have no argument (no-arg call like "update:")  *)
+(* or one argument.                                                      *)
+message_first_selector = selector_with_colon [ message_argument ] ;
+
+(* Additional selectors always have an argument *)
+message_additional_selector = selector_with_colon message_argument ;
+
+(* A message argument is an expression. Complex expressions must be      *)
+(* wrapped in parens. Simple arguments (literals, identifiers, property  *)
+(* accesses) can appear bare.                                            *)
+(*                                                                       *)
+(* Examples:                                                             *)
+(*   enemy moveTo: 100 y: 50;         — literal args                    *)
+(*   enemy moveTo: player.x y: pos;   — identifier/property args        *)
+(*   enemy takeDamage: (w.power + b);  — complex expression in parens   *)
+
+message_argument = unary_expression ;
+
+(* --- New Expression --- *)
+
+(* Object construction. Uses "new Type" followed by a constructor        *)
+(* selector chain. No-arg: "new Type:". Named: "new Type seg: arg".      *)
+
+new_expression = "new" identifier new_arguments ;
+
+(* No-arg constructor: "new Enemy:" or "new Enemy:;"                     *)
+(* Named constructor: "new Enemy withHealth: 100 atX: 50"               *)
+new_arguments = ":"                                     (* no-arg *)
+              | message_first_selector { message_additional_selector } ;
+
+
+(* ===================================================================== *)
+(* 11. LEXICAL ELEMENTS                                                  *)
+(* ===================================================================== *)
+
+(* --- Identifiers --- *)
+
+(* Standard identifier rules. Must not be a reserved keyword.            *)
+(* Identifiers may start with a letter or underscore (for private        *)
+(* field naming conventions like _x).                                    *)
+identifier = ( letter | "_" ) { letter | digit | "_" } ;
+
+letter = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j"
+       | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t"
+       | "u" | "v" | "w" | "x" | "y" | "z"
+       | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J"
+       | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T"
+       | "U" | "V" | "W" | "X" | "Y" | "Z" ;
+
+digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+
+hex_digit = digit | "a" | "b" | "c" | "d" | "e" | "f"
+                   | "A" | "B" | "C" | "D" | "E" | "F" ;
+
+(* --- Numeric Literals --- *)
+
+(* Decimal integers with optional underscore separators.                 *)
+(* Hex integers prefixed with 0x, also with optional underscores.        *)
+integer_literal = decimal_literal | hex_literal ;
+
+decimal_literal = digit { digit | "_" } ;
+
+hex_literal = "0x" hex_digit { hex_digit | "_" } ;
+
+(* Fixed-point literals — decimal with a fractional part.                *)
+(* Compiled to 8.8 fixed-point representation.                           *)
+fixed_literal = digit { digit | "_" } "." digit { digit | "_" } ;
+
+(* --- String Literals --- *)
+
+(* PETSCII strings enclosed in double quotes.                            *)
+string_literal = '"' { string_char } '"' ;
+
+(* Any character except unescaped double-quote or newline.               *)
+(* Standard escape sequences are supported.                              *)
+string_char = any_char_except_quote_or_newline | escape_sequence ;
+
+escape_sequence = "\" ( '"' | "\" | "n" | "r" | "t" | "0" ) ;
+
+(* --- Boolean Literals --- *)
+
+boolean_literal = "true" | "false" ;
+
+(* --- Null Literal --- *)
+
+null_literal = "null" ;
+
+
+(* ===================================================================== *)
+(* 12. CONSTANT EXPRESSIONS                                              *)
+(* ===================================================================== *)
+
+(* Constant expressions are required in certain contexts (array sizes,   *)
+(* enum values, const initializers). These must be evaluable at compile  *)
+(* time. Structurally they are a subset of expressions.                  *)
+
+const_expression = expression ;
+
+(* The compiler validates that const_expression contains only literals,  *)
+(* const references, enum values, and arithmetic on those. This is a     *)
+(* semantic constraint, not a syntactic one — the grammar accepts any    *)
+(* expression and the compiler rejects non-constant ones.                *)
+
+
+(* ===================================================================== *)
+(* 13. COMMENTS                                                          *)
+(* ===================================================================== *)
+
+(* Comments are lexically stripped before parsing. They do not appear     *)
+(* in the grammar's parse tree.                                          *)
+
+(* Single-line: //  through end of line                                  *)
+(* Multi-line:  /* ... */  (may nest in some implementations)            *)
+
+(* comment = "//" { any_char_except_newline } newline                    *)
+(*         | "/*" { any_char } "*/" ;                                    *)
+
+
+(* ===================================================================== *)
+(* 14. RESERVED KEYWORDS                                                 *)
+(* ===================================================================== *)
+
+(* The following identifiers are reserved and cannot be used as          *)
+(* user-defined names:                                                   *)
+(*                                                                       *)
+(* Type keywords:                                                        *)
+(*   byte  sbyte  word  sword  bool  fixed  string  var                  *)
+(*                                                                       *)
+(* Hardware type keywords:                                               *)
+(*   sprite  charset  music  sound  tilemap                              *)
+(*                                                                       *)
+(* Declaration keywords:                                                 *)
+(*   class  abstract  interface  enum  flags  scene  entry               *)
+(*   public  private  protected  const  import  new  ctor               *)
+(*                                                                       *)
+(* Control flow keywords:                                                *)
+(*   if  else  while  for  in  switch  case  default  fallthrough        *)
+(*   break  return  go                                                   *)
+(*                                                                       *)
+(* Literal keywords:                                                     *)
+(*   true  false  null                                                   *)
+(*                                                                       *)
+(* Scene lifecycle keywords:                                             *)
+(*   hardware  enter  frame  relaxed  raster  exit                       *)
+(*                                                                       *)
+(* Special identifiers (contextual):                                     *)
+(*   this  value  line  get  set                                         *)
+(*                                                                       *)
+(* Note: "get", "set", "value", "line" are contextual keywords —         *)
+(* they have special meaning only within property bodies and raster      *)
+(* declarations. They can be used as identifiers elsewhere.              *)
+
+
+(* ===================================================================== *)
+(* 15. OPERATOR PRECEDENCE SUMMARY (informative)                         *)
+(* ===================================================================== *)
+
+(* From lowest to highest precedence:                                    *)
+(*                                                                       *)
+(*  1.  ||          logical OR                                           *)
+(*  2.  &&          logical AND                                          *)
+(*  3.  |           bitwise OR                                           *)
+(*  4.  ^           bitwise XOR                                          *)
+(*  5.  &           bitwise AND                                          *)
+(*  6.  ==  !=      equality                                             *)
+(*  7.  <  >  <=  >=   relational                                       *)
+(*  8.  <<  >>      shift                                                *)
+(*  9.  +  -        additive                                             *)
+(* 10.  *  /  %     multiplicative                                       *)
+(* 11.  -  !  ~     unary prefix                                         *)
+(* 12.  .  ?.  []   postfix (member access, subscript)                   *)
+(* 13.  primary     literals, identifiers, (expr), (message send), new   *)
+(*                                                                       *)
+(* Message sends are NOT in the precedence table — they require          *)
+(* explicit delimiters: ";" at statement level, "()" in expressions.     *)
+
+
+(* ===================================================================== *)
+(* 16. COMPLETE EXAMPLE (informative — not part of the formal grammar)   *)
+(* ===================================================================== *)
+
+(* The following Cork program should be parseable by this grammar:       *)
+(*                                                                       *)
+(*   import "entities.cork";                                             *)
+(*   import Cork.Math;                                                   *)
+(*                                                                       *)
+(*   charset systemFont = import("system-font.bin");                     *)
+(*   music titleTheme = import("title.sid");                             *)
+(*                                                                       *)
+(*   word highScore = 0;                                                 *)
+(*   const byte MAX_ENEMIES = 8;                                         *)
+(*                                                                       *)
+(*   enum Direction : byte {                                             *)
+(*       up = 0,                                                         *)
+(*       down = 1,                                                       *)
+(*       left = 2,                                                       *)
+(*       right = 3                                                       *)
+(*   }                                                                   *)
+(*                                                                       *)
+(*   flags enum SpriteFlags : byte {                                     *)
+(*       none       = 0x00,                                              *)
+(*       visible    = 0x01,                                              *)
+(*       multicolor = 0x02,                                              *)
+(*       expandX    = 0x04                                               *)
+(*   }                                                                   *)
+(*                                                                       *)
+(*   interface IDamageable {                                             *)
+(*       takeDamage: (byte amount);                                      *)
+(*       byte health { get; }                                            *)
+(*   }                                                                   *)
+(*                                                                       *)
+(*   abstract class GameEntity {                                         *)
+(*       public fixed x = 0;                                             *)
+(*       public fixed y = 0;                                             *)
+(*       public bool active = false;                                     *)
+(*       public abstract update:;                                        *)
+(*       public fixed distanceTo: (GameEntity other) { ... }             *)
+(*   }                                                                   *)
+(*                                                                       *)
+(*   class Enemy : GameEntity, IDamageable {                             *)
+(*       private byte health = 3;                                        *)
+(*       private byte animFrame = 0;                                     *)
+(*                                                                       *)
+(*       ctor: { health = 3; x = 0; }                                   *)
+(*       ctor withHealth: (byte h) atX: (byte startX) {                  *)
+(*           health = h;                                                 *)
+(*           x = startX;                                                 *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       public takeDamage: (byte amount) {                              *)
+(*           health -= amount;                                           *)
+(*           if (health == 0) { destroy:; }                              *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       public update: {                                                *)
+(*           animFrame = (animFrame + 1) % 4;                            *)
+(*       }                                                               *)
+(*   }                                                                   *)
+(*                                                                       *)
+(*   entry scene TitleScreen {                                           *)
+(*       hardware {                                                      *)
+(*           border: Color.blue;                                         *)
+(*           background: Color.black;                                    *)
+(*           mode: text;                                                 *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       sprite logo {                                                   *)
+(*           data: import("logo.spr");                                   *)
+(*           x: 160;                                                     *)
+(*           y: 100;                                                     *)
+(*           color: Color.white;                                         *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       enter {                                                         *)
+(*           Music play: titleTheme;                                     *)
+(*           logo.visible = true;                                        *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       frame {                                                         *)
+(*           if (joystick.port2.fire) { go GameLevel; }                  *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       exit { Music stop:; }                                           *)
+(*   }                                                                   *)
+(*                                                                       *)
+(*   scene GameLevel {                                                   *)
+(*       Enemy[8] enemies;                                               *)
+(*                                                                       *)
+(*       relaxed frame {                                                 *)
+(*           for (enemy in enemies) {                                    *)
+(*               if (enemy.active) { enemy update:; }                    *)
+(*           }                                                           *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       raster(line: 200) {                                             *)
+(*           vic.border = Color.black;                                   *)
+(*       }                                                               *)
+(*   }                                                                   *)
+
+(* ===================================================================== *)
+(* END OF GRAMMAR                                                        *)
+(* ===================================================================== *)
