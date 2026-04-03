@@ -1,12 +1,25 @@
 (* ===================================================================== *)
 (* Cork Language — Formal Grammar in EBNF                                *)
+(* Version 2 — Rewritten to match the simplified language design         *)
 (* ===================================================================== *)
+(*                                                                       *)
 (* Cork is a high-level language that compiles to Commodore 64 machine   *)
 (* code. It blends C-style declarations with Smalltalk/ObjC-style       *)
-(* message passing. The colon is reserved exclusively for method calls   *)
-(* and declarations — it never appears in type annotations.              *)
+(* message passing.                                                      *)
 (*                                                                       *)
-(* Notation:                                                             *)
+(* Key design principles reflected in this grammar:                      *)
+(*   - Structs (not classes). No inheritance, no interfaces.             *)
+(*   - No constructors. Field defaults + initializer syntax.             *)
+(*   - No properties. Dot = field access, colon = method call.           *)
+(*   - No access modifiers. Everything is public.                        *)
+(*   - No null. Every variable is always initialized.                    *)
+(*   - No `func` keyword. Methods are declared by signature alone.       *)
+(*   - `const` for immutables (not `let`).                               *)
+(*   - Struct initializers use `=` not `:` — Enemy { health = 10 }.     *)
+(*   - No dot-enum shorthand — always Color.blue, never .blue.          *)
+(*   - Semicolons required. Braces required.                             *)
+(*                                                                       *)
+(* Notation (ISO 14977 EBNF):                                           *)
 (*   =     production rule definition                                    *)
 (*   |     alternatives                                                  *)
 (*   { }   repetition (zero or more)                                     *)
@@ -23,9 +36,8 @@
 (* ===================================================================== *)
 
 (* A Cork program is a sequence of top-level declarations. Exactly one   *)
-(* scene must be marked "entry". Global declarations (variables,         *)
-(* resources, classes, etc.) live outside any scene and are always        *)
-(* resident in memory.                                                   *)
+(* scene must be marked "entry". Global declarations live outside any    *)
+(* scene and are always resident in memory.                              *)
 
 program = { top_level_declaration } ;
 
@@ -33,9 +45,7 @@ top_level_declaration = import_declaration
                       | global_variable_declaration
                       | resource_declaration
                       | enum_declaration
-                      | class_declaration
-                      | abstract_class_declaration
-                      | interface_declaration
+                      | struct_declaration
                       | scene_declaration ;
 
 
@@ -43,14 +53,15 @@ top_level_declaration = import_declaration
 (* 2. IMPORTS                                                            *)
 (* ===================================================================== *)
 
-(* Two forms: file imports for Cork source files, and library imports    *)
-(* for named library packages. Both are statement-level.                 *)
+(* Three forms:                                                          *)
+(*   import "file.cork";           — source file import                  *)
+(*   import Cork.Math;             — library import (dotted name)        *)
+(*   charset font = import("f");   — resource import (see section 4)     *)
 
 import_declaration = file_import | library_import ;
 
 file_import = "import" string_literal ";" ;
 
-(* Library imports use dotted names, e.g., Cork.Math *)
 library_import = "import" qualified_name ";" ;
 
 qualified_name = identifier { "." identifier } ;
@@ -61,30 +72,30 @@ qualified_name = identifier { "." identifier } ;
 (* ===================================================================== *)
 
 (* Cork has primitive types, built-in hardware types, user-defined       *)
-(* types (classes, enums), and array types. The "?" suffix makes any     *)
-(* type nullable. "var" is used for type inference and is only valid     *)
-(* in variable declarations, not as a standalone type.                   *)
+(* struct/enum types, and fixed-size array types. There are no nullable  *)
+(* types — every value always exists. "var" is used for type inference   *)
+(* in variable declarations only, not as a standalone type.              *)
 
-type = non_nullable_type [ "?" ] ;
-
-non_nullable_type = primitive_type
-                  | hardware_type
-                  | user_type
-                  | array_type ;
+type = primitive_type
+     | hardware_type
+     | user_type
+     | array_type ;
 
 primitive_type = "byte" | "sbyte" | "word" | "sword"
                | "bool" | "fixed" | "string" ;
 
 (* Built-in hardware types — lowercase, always available, no imports.    *)
-(* These represent C64 hardware resources.                               *)
+(* These represent C64 hardware resources managed by the compiler.       *)
 hardware_type = "sprite" | "charset" | "music" | "sound" | "tilemap" ;
 
-(* User-defined type names (classes, enums, interfaces) *)
+(* User-defined type names (structs, enums).                             *)
 user_type = identifier ;
 
-(* Fixed-size arrays: the size is a compile-time constant expression.    *)
+(* Fixed-size arrays: size is a compile-time constant expression.        *)
 (* Written as Type[Size], e.g., byte[20] or Enemy[8].                   *)
-array_type = ( primitive_type | hardware_type | user_type ) "[" const_expression "]" ;
+(* The base can be any non-array type — no arrays of arrays.             *)
+array_type = ( primitive_type | hardware_type | user_type )
+             "[" const_expression "]" ;
 
 
 (* ===================================================================== *)
@@ -92,39 +103,40 @@ array_type = ( primitive_type | hardware_type | user_type ) "[" const_expression
 (* ===================================================================== *)
 
 (* Variable declarations are C-style: type before name. "var" enables    *)
-(* type inference. No colons appear in declarations. "const" makes the   *)
-(* binding immutable.                                                    *)
+(* type inference. "const" makes the binding immutable. No colons in     *)
+(* declarations.                                                         *)
 
-(* Global-scope variable declaration *)
 global_variable_declaration = variable_declaration ;
 
-(* Variable declaration — usable at global, scene, class, or local scope *)
-(* Four forms:                                                           *)
-(*   byte x = 5;              — explicit type, optional initializer      *)
+(* Variable declaration — usable at global, scene, struct, or local scope*)
+(* Five forms:                                                           *)
+(*   byte x = 5;              — explicit type, with initializer          *)
+(*   byte x;                  — explicit type, default-initialized       *)
 (*   var x = 5;               — inferred type, initializer required      *)
-(*   const byte MAX = 8;      — constant with explicit type              *)
-(*   const MAX = 8;           — constant with inferred type (no "var")   *)
+(*   const byte MAX = 8;      — typed constant                           *)
+(*   const MAX = 8;           — inferred constant (no "var" needed)      *)
 variable_declaration = typed_var_decl ";"
                      | inferred_var_decl ";"
                      | const_typed_decl ";"
                      | const_inferred_decl ";" ;
 
-(* Explicit type: "byte x = 5;" or "Enemy? target = null;" *)
+(* Explicit type: "byte x = 5;" or "Enemy enemy;" or                     *)
+(* "var e = Enemy { health = 10 };"                                      *)
 typed_var_decl = type identifier [ "=" expression ] ;
 
-(* Inferred type: "var x = 5;" — initializer is required *)
+(* Inferred type: "var x = 5;" — initializer is mandatory                *)
 inferred_var_decl = "var" identifier "=" expression ;
 
-(* Constant with explicit type: "const byte MAX_LIVES = 3;" *)
+(* Constant with explicit type: "const byte MAX_LIVES = 3;"             *)
 const_typed_decl = "const" type identifier "=" expression ;
 
-(* Constant with inferred type: "const MAX_ENEMIES = 8;" — no "var"     *)
-(* needed, the compiler infers the type from the initializer.            *)
+(* Constant with inferred type: "const MAX_ENEMIES = 8;"                *)
 const_inferred_decl = "const" identifier "=" expression ;
 
 (* Resource import — binds a binary file to a hardware type.             *)
 (* e.g., charset font = import("font.bin");                              *)
-resource_declaration = hardware_type identifier "=" "import" "(" string_literal ")" ";" ;
+resource_declaration = hardware_type identifier "="
+                       "import" "(" string_literal ")" ";" ;
 
 
 (* ===================================================================== *)
@@ -132,16 +144,12 @@ resource_declaration = hardware_type identifier "=" "import" "(" string_literal 
 (* ===================================================================== *)
 
 (* Standard enums and flags enums. Both require an explicit backing type *)
-(* specified after the colon. The "flags" keyword modifier enables       *)
-(* bitwise combination.                                                  *)
-
-(* Note: This is the ONE place where ":" appears outside of message      *)
-(* passing — in enum backing-type syntax. This follows the C#/Swift      *)
-(* convention and is syntactically unambiguous because it always appears  *)
-(* between the enum name and a primitive type keyword. In Cork, the      *)
-(* colon-means-invoke principle applies to method calls and declarations *)
-(* involving receiver/argument patterns, not to this inheritance-style   *)
-(* annotation which mirrors class inheritance syntax.                    *)
+(* specified with `:`. The "flags" keyword modifier enables bitwise ops. *)
+(*                                                                       *)
+(* Note: The `:` between enum name and backing type is the ONE place     *)
+(* where `:` appears outside of message passing. This is unambiguous     *)
+(* because it always appears between an enum name and a primitive type   *)
+(* keyword, in a declaration header context.                             *)
 
 enum_declaration = [ "flags" ] "enum" identifier ":" primitive_type
                    "{" enum_member_list "}" ;
@@ -152,151 +160,74 @@ enum_member = identifier "=" expression ;
 
 
 (* ===================================================================== *)
-(* 6. CLASSES                                                            *)
+(* 6. STRUCTS                                                            *)
 (* ===================================================================== *)
 
-(* Single inheritance, multiple interfaces. The base class or interface  *)
-(* list uses ":" after the class name, following C#/C++ convention.      *)
-(* This is syntactically distinct from message-passing colons because    *)
-(* it appears in a declaration header, not in a statement or expression. *)
+(* Structs are Cork's only composite type. They are value types with     *)
+(* known size at compile time. All fields are public. Structs can have   *)
+(* methods. There is no inheritance, no interfaces, no abstract members. *)
+(*                                                                       *)
+(* Fields can have default values. When a struct variable is declared    *)
+(* without an initializer, all fields take their defaults. Initializer   *)
+(* syntax overrides specific fields: Enemy { health = 10, x = 100 }.    *)
 
-class_declaration = "class" identifier [ ":" class_parent_list ]
-                    "{" { class_member } "}" ;
+struct_declaration = "struct" identifier "{" { struct_member } "}" ;
 
-abstract_class_declaration = "abstract" "class" identifier [ ":" class_parent_list ]
-                             "{" { abstract_class_member } "}" ;
+struct_member = struct_field | struct_method ;
 
-(* Parent list: optional single base class, then interfaces *)
-class_parent_list = identifier { "," identifier } ;
+(* Field: type + name, with optional default value.                      *)
+(* e.g., byte health = 3;  or  fixed x = 0;  or  bool active = false;   *)
+(* Fields may also be struct types: Position pos;                        *)
+struct_field = type identifier [ "=" expression ] ";" ;
 
-(* --- Class Members --- *)
+(* Methods on structs. No `func` keyword, no access modifiers.           *)
+(* Return type is C-style (before the selector). Void methods omit it.   *)
+struct_method = method_declaration ;
 
-class_member = class_field
-             | class_property
-             | class_method
-             | class_constructor ;
 
-abstract_class_member = abstract_method
-                      | class_member ;
-
-(* Field: access modifier + type + name, optional initializer.           *)
-(* e.g., private byte health = 3;                                        *)
-(* Constants are also allowed: public const byte MAX = 8;                *)
-class_field = [ access_modifier ] ( typed_var_decl
-                                  | inferred_var_decl
-                                  | const_typed_decl
-                                  | const_inferred_decl ) ";" ;
-
-(* Property — two forms: auto-property and computed property *)
-class_property = [ access_modifier ] type identifier "{" property_body "}" ;
-
-(* Auto-property: "get; set;" or "get;" *)
-(* Computed property: "get { ... } set { ... }" or just "get { ... }" *)
-property_body = auto_property_body | computed_property_body ;
-
-auto_property_body = "get" ";" [ "set" ";" ] ;
-
-computed_property_body = property_getter [ property_setter ]
-                       | property_setter [ property_getter ] ;
-
-property_getter = "get" block ;
-
-(* In a setter, "value" is the implicit parameter name *)
-property_setter = "set" block ;
-
-(* --- Methods --- *)
+(* ===================================================================== *)
+(* 7. METHOD DECLARATIONS                                                *)
+(* ===================================================================== *)
 
 (* Methods use message-passing syntax for their signatures. The return   *)
-(* type is C-style (before the first selector segment). No "func"       *)
-(* keyword.                                                              *)
+(* type (if any) precedes the first selector segment. No "func" keyword. *)
 (*                                                                       *)
 (* Method signature forms:                                               *)
 (*   update:                          — void, no args                    *)
-(*   takeDamage: (byte amount)        — void, one segment with one arg  *)
+(*   takeDamage: (byte amount)        — void, one arg                   *)
 (*   moveTo: (byte x) y: (byte y)    — void, two segments              *)
-(*   byte distanceFromX: (byte x) toY: (byte y)  — with return type    *)
+(*   byte getHealth:                  — returns byte, no args           *)
+(*   fixed distanceTo: (Enemy other)  — returns fixed, one arg          *)
+(*   byte distanceFromX: (byte x) toY: (byte y)  — returns, two segs   *)
 (*                                                                       *)
 (* The full method identity is the concatenation of its selector         *)
-(* segments: "distanceFromX:toY:"                                        *)
-
-class_method = [ access_modifier ] method_declaration ;
+(* segments: e.g., "distanceFromX:toY:"                                  *)
 
 method_declaration = [ type ] method_signature block ;
-
-(* Abstract methods have no body *)
-abstract_method = [ access_modifier ] "abstract" [ type ] method_signature ";" ;
 
 (* The method signature is the selector chain: one or more segments,     *)
 (* each ending with a colon. The first segment may have no parameter     *)
 (* (for no-arg methods like "update:") or may have one. Subsequent       *)
 (* segments always have a parameter.                                     *)
-(*                                                                       *)
-(* Grammar encoding:                                                     *)
-(*   No-arg method:     "update:"                                        *)
-(*   Single arg:        "takeDamage:" "(" type ident ")"                 *)
-(*   Multi-segment:     "moveTo:" "(" type ident ")" "y:" "(" type ")"  *)
 
 method_signature = method_first_segment { method_additional_segment } ;
 
-(* The first segment: a selector-colon, optionally followed by a param  *)
+(* First segment: selector-colon, optionally followed by a parameter.    *)
+(* No parameter = no-arg method (e.g., "update:").                       *)
+(* With parameter = one-arg method (e.g., "takeDamage: (byte amount)").  *)
 method_first_segment = selector_with_colon [ parameter ] ;
 
-(* Additional segments: a selector-colon, always followed by a param    *)
+(* Additional segments always have a parameter.                          *)
 method_additional_segment = selector_with_colon parameter ;
 
 (* A selector is an identifier immediately followed by ":".              *)
 (* e.g., "moveTo:" or "update:" or "y:".                                 *)
-(* Lexically this is identifier + ":" with no intervening whitespace     *)
-(* in the selector name, but whitespace before the argument is allowed.  *)
+(* Lexically: identifier + ":" with no intervening whitespace in the     *)
+(* selector name. Whitespace before the argument is allowed.             *)
 selector_with_colon = identifier ":" ;
 
+(* Parameter: parenthesized type + name pair.                            *)
 parameter = "(" type identifier ")" ;
-
-
-(* --- Constructors --- *)
-
-(* Constructors use "ctor" instead of a return type. The signature       *)
-(* follows the same message-passing pattern as methods.                  *)
-(*   ctor:                                       — no-arg constructor    *)
-(*   ctor withHealth: (byte h) atX: (byte x)     — named constructor    *)
-
-class_constructor = [ access_modifier ] constructor_declaration ;
-
-constructor_declaration = "ctor" constructor_signature block ;
-
-(* "ctor:" for no-arg, or "ctor" + segments for named constructors.      *)
-(* Note: A bare "ctor:" has no leading selector name before the colon — *)
-(* the "ctor" keyword itself acts as the base, and ":" signals no args.  *)
-(* For named constructors, the first segment is a named selector.        *)
-constructor_signature = ":" (* no-arg constructor *)
-                      | method_first_segment { method_additional_segment } ;
-
-
-(* --- Access Modifiers --- *)
-
-access_modifier = "public" | "private" | "protected" ;
-
-
-(* ===================================================================== *)
-(* 7. INTERFACES                                                         *)
-(* ===================================================================== *)
-
-(* Interfaces declare method signatures (no bodies) and property         *)
-(* signatures (auto-property style only). They may extend other          *)
-(* interfaces via ":" parent list.                                       *)
-
-interface_declaration = "interface" identifier [ ":" interface_parent_list ]
-                        "{" { interface_member } "}" ;
-
-interface_parent_list = identifier { "," identifier } ;
-
-interface_member = interface_method | interface_property ;
-
-(* Interface methods have no body — just a signature followed by ";" *)
-interface_method = [ type ] method_signature ";" ;
-
-(* Interface properties: type + name + auto-property accessors *)
-interface_property = type identifier "{" auto_property_body "}" ;
 
 
 (* ===================================================================== *)
@@ -305,7 +236,7 @@ interface_property = type identifier "{" auto_property_body "}" ;
 
 (* Scenes are the primary architectural unit. Exactly one must be marked *)
 (* "entry". A scene can contain: hardware blocks, resource declarations, *)
-(* sprite declarations, lifecycle blocks, variables, and methods.        *)
+(* sprite declarations, lifecycle blocks, variables, and helper methods. *)
 
 scene_declaration = [ "entry" ] "scene" identifier "{" { scene_member } "}" ;
 
@@ -318,9 +249,10 @@ scene_member = hardware_block
 
 (* --- Hardware Block --- *)
 
-(* Declarative configuration for VIC-II settings. Uses colon syntax      *)
-(* for key-value pairs. This is a declarative context — the colons here  *)
-(* are part of the hardware DSL, pairing property names to values.       *)
+(* Declarative configuration for VIC-II settings. Uses key: value pairs. *)
+(* The colons here are part of the declarative hardware DSL — they pair  *)
+(* setting names to values, consistent with the "colon = invoke" idea    *)
+(* (the hardware block "sets" each property).                            *)
 
 hardware_block = "hardware" "{" { hardware_setting } "}" ;
 
@@ -337,8 +269,8 @@ scene_variable_declaration = variable_declaration ;
 (* --- Sprite Declarations --- *)
 
 (* Sprites are declared with the "sprite" keyword followed by a name     *)
-(* and a block of property settings. This is a declarative construct     *)
-(* specific to scenes.                                                   *)
+(* and a block of property settings. Declarative construct for C64       *)
+(* hardware sprites.                                                     *)
 
 scene_sprite_declaration = "sprite" identifier "{" { sprite_setting } "}" ;
 
@@ -347,7 +279,8 @@ sprite_setting = identifier ":" expression ";" ;
 (* --- Lifecycle Blocks --- *)
 
 (* Lifecycle blocks are keywords, not methods. They represent the        *)
-(* scene's execution phases.                                             *)
+(* scene's execution phases. The compiler generates the appropriate      *)
+(* setup code (main loop, IRQ handlers, etc.).                           *)
 
 scene_lifecycle_block = enter_block
                       | frame_block
@@ -360,20 +293,20 @@ enter_block = "enter" block ;
 frame_block = "frame" block ;
 
 (* "relaxed frame" is a keyword modifier — the compiler warns instead   *)
-(* of erroring when the cycle budget might overrun.                      *)
+(* of erroring when the estimated cycle budget might overrun.            *)
 relaxed_frame_block = "relaxed" "frame" block ;
 
-(* Raster interrupt at a specific scanline. The compiler wires the IRQ.  *)
-(* Multiple raster blocks are allowed per scene.                         *)
-(* Syntax: raster N { ... }                                              *)
-raster_block = "raster" expression block ;
+(* Raster interrupt at a specific scanline. Just the keyword and a       *)
+(* number — no parentheses. The compiler wires the IRQ automatically.   *)
+(* Multiple raster blocks per scene are allowed; the compiler sorts     *)
+(* them by line number and chains them as IRQ handlers.                  *)
+raster_block = "raster" integer_literal block ;
 
 exit_block = "exit" block ;
 
 (* --- Scene Methods --- *)
 
-(* Scene-private helper methods, same syntax as class methods but        *)
-(* without access modifiers.                                             *)
+(* Scene-local helper methods. Same syntax as struct methods.            *)
 scene_method = method_declaration ;
 
 
@@ -387,9 +320,9 @@ scene_method = method_declaration ;
 block = "{" { statement } "}" ;
 
 statement = variable_declaration
-          | expression_statement
           | assignment_statement
           | message_send_statement
+          | expression_statement
           | if_statement
           | while_statement
           | for_statement
@@ -398,30 +331,30 @@ statement = variable_declaration
           | fallthrough_switch_statement
           | go_statement
           | return_statement
-          | break_statement ;
-
-(* --- Expression Statement --- *)
-
-(* A bare expression evaluated for its side effects. Terminated by ";".  *)
-expression_statement = expression ";" ;
+          | break_statement
+          | continue_statement ;
 
 (* --- Assignment --- *)
 
-(* Assignment to an lvalue. Compound assignments included.               *)
+(* Assignment to an lvalue. Includes compound assignments.               *)
 assignment_statement = lvalue assignment_operator expression ";" ;
 
-(* An lvalue is anything that can appear on the left side of assignment. *)
-(* This includes simple identifiers, chained property access (with dots),*)
-(* and array element access. These can be combined:                      *)
-(*   x                         — simple variable                         *)
-(*   this.x                    — field access                            *)
-(*   enemy.health              — property access                         *)
-(*   vic.border                — chained hardware access                 *)
-(*   enemies[i]                — array element                           *)
-(*   enemies[i].health         — array element property                  *)
-(* "this" can appear as the root of an lvalue for field assignment:      *)
-(*   this.x = 100;                                                       *)
-lvalue = ( identifier | "this" ) { "." identifier } [ "[" expression "]" ] { "." identifier } ;
+(* An lvalue is anything that can appear on the left side of "=".        *)
+(* Supports chained field access (dots) and array indexing, in any       *)
+(* combination:                                                          *)
+(*   x                      — simple variable                            *)
+(*   this.x                 — field via explicit self                     *)
+(*   enemy.health           — field access                               *)
+(*   enemies[i]             — array element                              *)
+(*   enemies[i].health      — array element field                        *)
+(*   enemy.pos.x            — nested field access                        *)
+(*   vic.border             — hardware register                          *)
+lvalue = lvalue_root { lvalue_suffix } ;
+
+lvalue_root = identifier | "this" ;
+
+lvalue_suffix = "." identifier
+              | "[" expression "]" ;
 
 assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
                     | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
@@ -434,15 +367,18 @@ assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
 (*   enemy moveTo: 100 y: 50;                                           *)
 (*   Music play: bgm;                                                    *)
 (*   enemy takeDamage: (weapon.power + bonus);                           *)
-(*   target?.takeDamage: 1;                                              *)
 (*                                                                       *)
-(* The receiver is an expression (identifier, property access, etc.).    *)
-(* This is followed by a selector chain with arguments.                  *)
-(*                                                                       *)
-(* Note on null-conditional sends: "target?.takeDamage:" is a safe send  *)
-(* that only executes if target is non-null.                             *)
+(* The receiver is a postfix expression (identifier, field access, etc.) *)
+(* followed by a selector chain with arguments.                          *)
 
 message_send_statement = message_send_expression ";" ;
+
+(* --- Expression Statement --- *)
+
+(* A bare expression evaluated for its side effects. Terminated by ";".  *)
+(* This covers standalone function-like expressions and other cases      *)
+(* that don't fit the message send or assignment patterns.               *)
+expression_statement = expression ";" ;
 
 (* --- Control Flow --- *)
 
@@ -452,21 +388,23 @@ if_statement = "if" "(" expression ")" block
 
 while_statement = "while" "(" expression ")" block ;
 
-(* C-style for loop *)
+(* C-style three-part for loop.                                          *)
 for_statement = "for" "(" for_init ";" expression ";" for_step ")" block ;
 
 for_init = typed_var_decl | inferred_var_decl | assignment_expression ;
 
-(* The step part is an assignment or standalone expression *)
+(* The step is an assignment or a bare expression (e.g., i++             *)
+(* — though Cork has no ++ operator, so typically i += 1 or similar).    *)
 for_step = assignment_expression | expression ;
 
 assignment_expression = lvalue assignment_operator expression ;
 
-(* For-each iteration over a collection *)
+(* For-each iteration over a collection (typically an array).            *)
+(* The loop variable is implicitly declared with the element type.       *)
 for_each_statement = "for" "(" identifier "in" expression ")" block ;
 
-(* Switch — no fallthrough. Each case is independent, no "break" needed. *)
-(* Supports both constant and expression cases.                          *)
+(* Switch — no fallthrough by default. Each case is independent.         *)
+(* No "break" needed. Supports constant and expression cases.            *)
 switch_statement = "switch" "(" expression ")" "{"
                    { switch_case }
                    [ default_case ]
@@ -477,81 +415,90 @@ switch_case = "case" expression ":" { statement } ;
 default_case = "default" ":" { statement } ;
 
 (* Fallthrough switch — C-style. Cases fall through unless "break" is    *)
-(* explicitly used.                                                      *)
+(* explicitly used. The "fallthrough" keyword modifier precedes "switch".*)
 fallthrough_switch_statement = "fallthrough" "switch" "(" expression ")" "{"
-                               { fallthrough_case }
+                               { switch_case }
                                [ default_case ]
                                "}" ;
 
-fallthrough_case = "case" expression ":" { statement } ;
-
-(* Scene transition *)
+(* Scene transition — unloads current scene, loads target scene.         *)
 go_statement = "go" identifier ";" ;
 
-(* Return from a method *)
+(* Return from a method. Optional expression for non-void methods.       *)
 return_statement = "return" [ expression ] ";" ;
 
-(* Break out of a fallthrough switch case *)
+(* Break out of a loop or fallthrough switch case.                       *)
 break_statement = "break" ";" ;
+
+(* Continue to the next iteration of a loop.                             *)
+continue_statement = "continue" ";" ;
 
 
 (* ===================================================================== *)
 (* 10. EXPRESSIONS                                                       *)
 (* ===================================================================== *)
 
-(* Expressions are defined with standard operator precedence, from       *)
-(* lowest to highest. Message sends in expression context require        *)
-(* parentheses to delimit them.                                          *)
+(* Expressions follow standard operator precedence (lowest to highest).  *)
+(* Message sends in expression context must be wrapped in parentheses.   *)
 
 expression = logical_or_expression ;
 
-(* --- Logical Operators --- *)
+(* --- Logical Operators (lowest precedence) --- *)
 
-logical_or_expression = logical_and_expression { "||" logical_and_expression } ;
+logical_or_expression = logical_and_expression
+                        { "||" logical_and_expression } ;
 
-logical_and_expression = bitwise_or_expression { "&&" bitwise_or_expression } ;
+logical_and_expression = bitwise_or_expression
+                         { "&&" bitwise_or_expression } ;
 
 (* --- Bitwise Operators --- *)
 
-bitwise_or_expression = bitwise_xor_expression { "|" bitwise_xor_expression } ;
+bitwise_or_expression = bitwise_xor_expression
+                        { "|" bitwise_xor_expression } ;
 
-bitwise_xor_expression = bitwise_and_expression { "^" bitwise_and_expression } ;
+bitwise_xor_expression = bitwise_and_expression
+                         { "^" bitwise_and_expression } ;
 
-bitwise_and_expression = equality_expression { "&" equality_expression } ;
+bitwise_and_expression = equality_expression
+                         { "&" equality_expression } ;
 
 (* --- Equality Operators --- *)
 
-equality_expression = relational_expression { ( "==" | "!=" ) relational_expression } ;
+equality_expression = relational_expression
+                      { ( "==" | "!=" ) relational_expression } ;
 
 (* --- Relational Operators --- *)
 
-relational_expression = shift_expression { ( "<" | ">" | "<=" | ">=" ) shift_expression } ;
+relational_expression = shift_expression
+                        { ( "<" | ">" | "<=" | ">=" ) shift_expression } ;
 
 (* --- Shift Operators --- *)
 
-shift_expression = additive_expression { ( "<<" | ">>" ) additive_expression } ;
+shift_expression = additive_expression
+                   { ( "<<" | ">>" ) additive_expression } ;
 
 (* --- Arithmetic Operators --- *)
 
-additive_expression = multiplicative_expression { ( "+" | "-" ) multiplicative_expression } ;
+additive_expression = multiplicative_expression
+                      { ( "+" | "-" ) multiplicative_expression } ;
 
-multiplicative_expression = unary_expression { ( "*" | "/" | "%" ) unary_expression } ;
+multiplicative_expression = unary_expression
+                            { ( "*" | "/" | "%" ) unary_expression } ;
 
 (* --- Unary Operators --- *)
 
 unary_expression = ( "-" | "!" | "~" ) unary_expression
                  | postfix_expression ;
 
-(* --- Postfix Expressions --- *)
+(* --- Postfix Expressions (highest precedence before primary) --- *)
 
-(* Postfix covers property access (dot), array indexing, and the         *)
-(* null-conditional operator "?.".                                       *)
+(* Postfix covers field access (dot) and array indexing.                 *)
+(* No null-conditional (?.) operator — Cork has no null.                 *)
 
 postfix_expression = primary_expression { postfix_operation } ;
 
-postfix_operation = "." identifier                   (* property/field access *)
-                  | "?." identifier                  (* null-conditional access *)
-                  | "[" expression "]" ;             (* array indexing *)
+postfix_operation = "." identifier          (* field access *)
+                  | "[" expression "]" ;    (* array indexing *)
 
 (* --- Primary Expressions --- *)
 
@@ -559,108 +506,107 @@ primary_expression = integer_literal
                    | fixed_literal
                    | string_literal
                    | boolean_literal
-                   | null_literal
-                   | "this"                      (* self-reference in methods *)
+                   | "this"                     (* self-reference in methods *)
                    | identifier
-                   | new_expression
+                   | struct_initializer
                    | array_initializer
                    | resource_import_expression
                    | parenthesized_expression
                    | parenthesized_message_send ;
 
+(* Struct initializer — creates a struct value with field overrides.      *)
+(* Uses `=` for field assignment (not `:`).                              *)
+(* e.g., Enemy { health = 10, x = 100, y = 50 }                         *)
+(* The type name followed by `{` distinguishes this from a block.        *)
+(* Fields not mentioned keep their default values.                       *)
+(* Nested structs: Position { x = 100, y = 0 }                          *)
+struct_initializer = identifier "{" [ struct_init_field
+                     { "," struct_init_field } [ "," ] ] "}" ;
+
+struct_init_field = identifier "=" expression ;
+
 (* Array initializer — brace-enclosed list of expressions.               *)
-(* Used in const array declarations: const byte[256] table = { 0, 1, 2 }*)
+(* Used in const array declarations:                                     *)
+(*   const byte[4] table = { 0, 1, 2, 3 };                              *)
+(* Distinguished from struct initializer because array initializers      *)
+(* appear only after `=` in declarations, while struct initializers      *)
+(* are preceded by a type name.                                          *)
+(*                                                                       *)
+(* Note: Syntactically, a bare `{ expr, expr }` is ambiguous with       *)
+(* blocks when it appears in certain positions. The parser resolves      *)
+(* this contextually — array initializers only appear as the right-hand  *)
+(* side of const array declarations.                                     *)
 array_initializer = "{" expression { "," expression } [ "," ] "}" ;
 
-(* Resource import as an expression — used in sprite/hardware settings.   *)
+(* Resource import as an expression — used inside sprite/hardware blocks *)
 (* e.g., data: import("logo.spr");                                       *)
 resource_import_expression = "import" "(" string_literal ")" ;
 
-(* Parenthesized expression — standard grouping *)
+(* Parenthesized expression — standard grouping.                         *)
 parenthesized_expression = "(" expression ")" ;
 
 (* Parenthesized message send — message sends in expression context      *)
 (* MUST be wrapped in parens to delimit them.                            *)
-(* e.g., (enemy distanceFrom: player) or (value clamp: 0 max: 255)      *)
+(* e.g., (enemy distanceFrom: player)                                    *)
+(*        (value clamp: 0 max: 255)                                      *)
 (*                                                                       *)
-(* This is what makes message sends unambiguous in expressions:          *)
-(* the parens tell the parser where the send starts and ends.            *)
-(*                                                                       *)
-(* Note: A parenthesized expression and a parenthesized message send     *)
-(* are disambiguated by the parser: if the content after the receiver    *)
-(* contains a selector-colon pattern, it is a message send; otherwise    *)
-(* it is a plain grouped expression.                                     *)
+(* The parser disambiguates from parenthesized_expression: if the        *)
+(* content after the first subexpression contains a selector-colon       *)
+(* pattern, it is a message send; otherwise it is a grouped expression.  *)
 parenthesized_message_send = "(" message_send_expression ")" ;
-
-(* --- Message Send Expression --- *)
-
-(* A message send has a receiver and a selector chain.                   *)
-(* The receiver is a postfix expression (identifier, property access,    *)
-(* etc.). The selector chain is one or more selector:argument pairs.     *)
-(*                                                                       *)
-(* No-arg sends:   receiver method:                                      *)
-(* With args:      receiver segment: arg segment: arg                    *)
-(*                                                                       *)
-(* In statement context, the send is terminated by ";".                  *)
-(* In expression context, it is delimited by "(" and ")".               *)
-(*                                                                       *)
-(* The receiver can also use "?." for null-conditional sends:            *)
-(*   target?.takeDamage: 1                                               *)
-
-message_send_expression = message_receiver message_selector_chain ;
-
-(* The receiver is a postfix expression. For null-conditional sends,     *)
-(* the "?." appears between the receiver and the first selector:         *)
-(*   target?.takeDamage: 1;  — only sends if target is non-null          *)
-(* Syntactically, the "?." replaces the whitespace between receiver      *)
-(* and selector. For normal sends, there is just whitespace.             *)
-message_receiver = postfix_expression [ "?." ] ;
-
-(* The selector chain: a first selector (which may have no arg for       *)
-(* no-arg methods) followed by zero or more additional selectors that    *)
-(* always have arguments.                                                *)
-message_selector_chain = message_first_selector { message_additional_selector } ;
-
-(* The first selector may have no argument (no-arg call like "update:")  *)
-(* or one argument.                                                      *)
-message_first_selector = selector_with_colon [ message_argument ] ;
-
-(* Additional selectors always have an argument *)
-message_additional_selector = selector_with_colon message_argument ;
-
-(* A message argument is an expression. Complex expressions must be      *)
-(* wrapped in parens. Simple arguments (literals, identifiers, property  *)
-(* accesses) can appear bare.                                            *)
-(*                                                                       *)
-(* Examples:                                                             *)
-(*   enemy moveTo: 100 y: 50;         — literal args                    *)
-(*   enemy moveTo: player.x y: pos;   — identifier/property args        *)
-(*   enemy takeDamage: (w.power + b);  — complex expression in parens   *)
-
-message_argument = unary_expression ;
-
-(* --- New Expression --- *)
-
-(* Object construction. Uses "new Type" followed by a constructor        *)
-(* selector chain. No-arg: "new Type:". Named: "new Type seg: arg".      *)
-
-new_expression = "new" identifier new_arguments ;
-
-(* No-arg constructor: "new Enemy:" or "new Enemy:;"                     *)
-(* Named constructor: "new Enemy withHealth: 100 atX: 50"               *)
-new_arguments = ":"                                     (* no-arg *)
-              | message_first_selector { message_additional_selector } ;
 
 
 (* ===================================================================== *)
-(* 11. LEXICAL ELEMENTS                                                  *)
+(* 11. MESSAGE SEND EXPRESSIONS                                          *)
+(* ===================================================================== *)
+
+(* A message send has a receiver and a selector chain.                   *)
+(* The receiver is a postfix expression (identifier, field access, etc.) *)
+(*                                                                       *)
+(* No-arg sends:    receiver method:                                     *)
+(* With args:       receiver segment: arg segment: arg                   *)
+(*                                                                       *)
+(* At statement level, terminated by ";".                                 *)
+(* In expression context, delimited by "(" and ")".                      *)
+
+message_send_expression = message_receiver message_selector_chain ;
+
+(* The receiver is any postfix expression — a name, a field chain, etc.  *)
+message_receiver = postfix_expression ;
+
+(* The selector chain: first selector (may have no arg for no-arg        *)
+(* methods) followed by zero or more additional selectors that always    *)
+(* have arguments.                                                       *)
+message_selector_chain = message_first_selector
+                         { message_additional_selector } ;
+
+(* First selector may have no argument (no-arg call like "update:")      *)
+(* or one argument.                                                      *)
+message_first_selector = selector_with_colon [ message_argument ] ;
+
+(* Additional selectors always have an argument.                         *)
+message_additional_selector = selector_with_colon message_argument ;
+
+(* A message argument is a unary expression. Simple arguments (literals, *)
+(* identifiers, field accesses) can appear bare. Complex expressions     *)
+(* must be wrapped in parens (which is a parenthesized_expression or     *)
+(* parenthesized_message_send — both are primary, thus unary).           *)
+(*                                                                       *)
+(* Examples:                                                             *)
+(*   enemy moveTo: 100 y: 50;               — literal args              *)
+(*   enemy moveTo: player.x y: pos;         — identifier/field args     *)
+(*   enemy takeDamage: (w.power + bonus);   — complex expr in parens    *)
+message_argument = unary_expression ;
+
+
+(* ===================================================================== *)
+(* 12. LEXICAL ELEMENTS                                                  *)
 (* ===================================================================== *)
 
 (* --- Identifiers --- *)
 
 (* Standard identifier rules. Must not be a reserved keyword.            *)
-(* Identifiers may start with a letter or underscore (for private        *)
-(* field naming conventions like _x).                                    *)
+(* May start with a letter or underscore.                                *)
 identifier = ( letter | "_" ) { letter | digit | "_" } ;
 
 letter = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j"
@@ -679,14 +625,15 @@ hex_digit = digit | "a" | "b" | "c" | "d" | "e" | "f"
 
 (* Decimal integers with optional underscore separators.                 *)
 (* Hex integers prefixed with 0x, also with optional underscores.        *)
+(* No binary literal support.                                            *)
 integer_literal = decimal_literal | hex_literal ;
 
 decimal_literal = digit { digit | "_" } ;
 
 hex_literal = "0x" hex_digit { hex_digit | "_" } ;
 
-(* Fixed-point literals — decimal with a fractional part.                *)
-(* Compiled to 8.8 fixed-point representation.                           *)
+(* Fixed-point literals — decimal number with a fractional part.         *)
+(* Compiled to 8.8 fixed-point representation internally.                *)
 fixed_literal = digit { digit | "_" } "." digit { digit | "_" } ;
 
 (* --- String Literals --- *)
@@ -694,8 +641,6 @@ fixed_literal = digit { digit | "_" } "." digit { digit | "_" } ;
 (* PETSCII strings enclosed in double quotes.                            *)
 string_literal = '"' { string_char } '"' ;
 
-(* Any character except unescaped double-quote or newline.               *)
-(* Standard escape sequences are supported.                              *)
 string_char = any_char_except_quote_or_newline | escape_sequence ;
 
 escape_sequence = "\" ( '"' | "\" | "n" | "r" | "t" | "0" ) ;
@@ -704,115 +649,138 @@ escape_sequence = "\" ( '"' | "\" | "n" | "r" | "t" | "0" ) ;
 
 boolean_literal = "true" | "false" ;
 
-(* --- Null Literal --- *)
-
-null_literal = "null" ;
-
 
 (* ===================================================================== *)
-(* 12. CONSTANT EXPRESSIONS                                              *)
+(* 13. CONSTANT EXPRESSIONS                                              *)
 (* ===================================================================== *)
 
-(* Constant expressions are required in certain contexts (array sizes,   *)
-(* enum values, const initializers). These must be evaluable at compile  *)
-(* time. Structurally they are a subset of expressions.                  *)
+(* Constant expressions are required in certain contexts: array sizes,   *)
+(* enum member values, const initializers. They must be evaluable at     *)
+(* compile time.                                                         *)
+(*                                                                       *)
+(* Structurally they are a subset of expressions. The grammar accepts    *)
+(* any expression; the compiler rejects non-constant ones. Valid         *)
+(* constant expressions contain only: literals, const references, enum   *)
+(* values, and arithmetic/bitwise operations on those.                   *)
 
 const_expression = expression ;
 
-(* The compiler validates that const_expression contains only literals,  *)
-(* const references, enum values, and arithmetic on those. This is a     *)
-(* semantic constraint, not a syntactic one — the grammar accepts any    *)
-(* expression and the compiler rejects non-constant ones.                *)
-
 
 (* ===================================================================== *)
-(* 13. COMMENTS                                                          *)
+(* 14. COMMENTS (informative — lexically stripped before parsing)        *)
 (* ===================================================================== *)
-
-(* Comments are lexically stripped before parsing. They do not appear     *)
-(* in the grammar's parse tree.                                          *)
 
 (* Single-line: //  through end of line                                  *)
-(* Multi-line:  /* ... */  (may nest in some implementations)            *)
-
+(* Multi-line:  /* ... */                                                *)
+(*                                                                       *)
 (* comment = "//" { any_char_except_newline } newline                    *)
 (*         | "/*" { any_char } "*/" ;                                    *)
 
 
 (* ===================================================================== *)
-(* 14. RESERVED KEYWORDS                                                 *)
+(* 15. RESERVED KEYWORDS                                                 *)
 (* ===================================================================== *)
 
 (* The following identifiers are reserved and cannot be used as          *)
-(* user-defined names:                                                   *)
+(* user-defined names.                                                   *)
 (*                                                                       *)
-(* Type keywords:                                                        *)
-(*   byte  sbyte  word  sword  bool  fixed  string  var                  *)
+(* Primitive type keywords:                                              *)
+(*   byte  sbyte  word  sword  bool  fixed  string                       *)
 (*                                                                       *)
 (* Hardware type keywords:                                               *)
 (*   sprite  charset  music  sound  tilemap                              *)
 (*                                                                       *)
 (* Declaration keywords:                                                 *)
-(*   class  abstract  interface  enum  flags  scene  entry               *)
-(*   public  private  protected  const  import  new  ctor               *)
+(*   struct  enum  flags  scene  entry  const  import  var               *)
 (*                                                                       *)
 (* Control flow keywords:                                                *)
 (*   if  else  while  for  in  switch  case  default  fallthrough        *)
-(*   break  return  go                                                   *)
+(*   break  continue  return  go                                         *)
 (*                                                                       *)
 (* Literal keywords:                                                     *)
-(*   true  false  null                                                   *)
+(*   true  false                                                         *)
 (*                                                                       *)
 (* Scene lifecycle keywords:                                             *)
 (*   hardware  enter  frame  relaxed  raster  exit                       *)
 (*                                                                       *)
 (* Special identifiers (contextual):                                     *)
-(*   this  value  line  get  set                                         *)
+(*   this                                                                *)
 (*                                                                       *)
-(* Note: "get", "set", "value", "line" are contextual keywords —         *)
-(* they have special meaning only within property bodies and raster      *)
-(* declarations. They can be used as identifiers elsewhere.              *)
+(* REMOVED from previous version (no longer keywords):                   *)
+(*   class  abstract  interface  public  private  protected              *)
+(*   func  new  ctor  null  get  set  value                              *)
 
 
 (* ===================================================================== *)
-(* 15. OPERATOR PRECEDENCE SUMMARY (informative)                         *)
+(* 16. OPERATOR PRECEDENCE TABLE (informative)                           *)
 (* ===================================================================== *)
 
 (* From lowest to highest precedence:                                    *)
 (*                                                                       *)
-(*  1.  ||          logical OR                                           *)
-(*  2.  &&          logical AND                                          *)
-(*  3.  |           bitwise OR                                           *)
-(*  4.  ^           bitwise XOR                                          *)
-(*  5.  &           bitwise AND                                          *)
-(*  6.  ==  !=      equality                                             *)
-(*  7.  <  >  <=  >=   relational                                       *)
-(*  8.  <<  >>      shift                                                *)
-(*  9.  +  -        additive                                             *)
-(* 10.  *  /  %     multiplicative                                       *)
-(* 11.  -  !  ~     unary prefix                                         *)
-(* 12.  .  ?.  []   postfix (member access, subscript)                   *)
-(* 13.  primary     literals, identifiers, (expr), (message send), new   *)
+(*  Prec  Operators            Category        Associativity             *)
+(*  ----  -------------------  --------------  -------------             *)
+(*   1    ||                   logical OR      left-to-right             *)
+(*   2    &&                   logical AND     left-to-right             *)
+(*   3    |                    bitwise OR      left-to-right             *)
+(*   4    ^                    bitwise XOR     left-to-right             *)
+(*   5    &                    bitwise AND     left-to-right             *)
+(*   6    ==  !=               equality        left-to-right             *)
+(*   7    <  >  <=  >=         relational      left-to-right             *)
+(*   8    <<  >>               shift           left-to-right             *)
+(*   9    +  -                 additive        left-to-right             *)
+(*  10    *  /  %              multiplicative  left-to-right             *)
+(*  11    -  !  ~              unary prefix    right-to-left             *)
+(*  12    .  []                postfix         left-to-right             *)
+(*  13    (primary)            literals, ids,  n/a                       *)
+(*                             struct init,                              *)
+(*                             (expr), (send)                            *)
+(*                                                                       *)
+(* Assignment operators (=, +=, -=, etc.) are statement-level only —     *)
+(* they do not appear inside expressions. This avoids the classic        *)
+(* "assignment in condition" bug.                                        *)
 (*                                                                       *)
 (* Message sends are NOT in the precedence table — they require          *)
 (* explicit delimiters: ";" at statement level, "()" in expressions.     *)
+(* This avoids all ambiguity about where a send's arguments end.         *)
 
 
 (* ===================================================================== *)
-(* 16. COMPLETE EXAMPLE (informative — not part of the formal grammar)   *)
+(* 17. COMPLETE OPERATOR LIST (informative)                              *)
 (* ===================================================================== *)
 
-(* The following Cork program should be parseable by this grammar:       *)
+(* Arithmetic:   +   -   *   /   %                                      *)
+(* Comparison:   ==  !=  <   >   <=  >=                                  *)
+(* Logical:      &&  ||  !                                               *)
+(* Bitwise:      &   |   ^   ~   <<  >>                                  *)
+(* Assignment:   =   +=  -=  *=  /=  %=                                  *)
+(*               &=  |=  ^=  <<= >>=                                     *)
+(* Access:       .   []                                                  *)
+(* Message:      :  (selector-colon, lexically part of method names)     *)
+
+
+(* ===================================================================== *)
+(* 18. COMPLETE EXAMPLE PROGRAM (informative — not formal grammar)       *)
+(* ===================================================================== *)
+
+(* The following Cork program demonstrates all major language features   *)
+(* and should be fully parseable by this grammar.                        *)
 (*                                                                       *)
+(*   // === Imports ===                                                   *)
 (*   import "entities.cork";                                             *)
 (*   import Cork.Math;                                                   *)
 (*                                                                       *)
+(*   // === Global resources (always in memory) ===                      *)
 (*   charset systemFont = import("system-font.bin");                     *)
 (*   music titleTheme = import("title.sid");                             *)
+(*   music gameTheme = import("game.sid");                               *)
 (*                                                                       *)
+(*   // === Global state ===                                             *)
 (*   word highScore = 0;                                                 *)
+(*   byte currentLevel = 1;                                              *)
 (*   const byte MAX_ENEMIES = 8;                                         *)
+(*   const word SCREEN_WIDTH = 320;                                      *)
 (*                                                                       *)
+(*   // === Enums ===                                                    *)
 (*   enum Direction : byte {                                             *)
 (*       up = 0,                                                         *)
 (*       down = 1,                                                       *)
@@ -824,42 +792,82 @@ const_expression = expression ;
 (*       none       = 0x00,                                              *)
 (*       visible    = 0x01,                                              *)
 (*       multicolor = 0x02,                                              *)
-(*       expandX    = 0x04                                               *)
+(*       expandX    = 0x04,                                              *)
+(*       expandY    = 0x08                                               *)
 (*   }                                                                   *)
 (*                                                                       *)
-(*   interface IDamageable {                                             *)
-(*       takeDamage: (byte amount);                                      *)
-(*       byte health { get; }                                            *)
-(*   }                                                                   *)
+(*   // === Structs ===                                                  *)
+(*   struct Position {                                                   *)
+(*       fixed x = 0;                                                    *)
+(*       fixed y = 0;                                                    *)
 (*                                                                       *)
-(*   abstract class GameEntity {                                         *)
-(*       public fixed x = 0;                                             *)
-(*       public fixed y = 0;                                             *)
-(*       public bool active = false;                                     *)
-(*       public abstract update:;                                        *)
-(*       public fixed distanceTo: (GameEntity other) { ... }             *)
-(*   }                                                                   *)
-(*                                                                       *)
-(*   class Enemy : GameEntity, IDamageable {                             *)
-(*       private byte health = 3;                                        *)
-(*       private byte animFrame = 0;                                     *)
-(*                                                                       *)
-(*       ctor: { health = 3; x = 0; }                                   *)
-(*       ctor withHealth: (byte h) atX: (byte startX) {                  *)
-(*           health = h;                                                 *)
-(*           x = startX;                                                 *)
+(*       moveTo: (fixed newX) y: (fixed newY) {                          *)
+(*           x = newX;                                                   *)
+(*           y = newY;                                                   *)
 (*       }                                                               *)
 (*                                                                       *)
-(*       public takeDamage: (byte amount) {                              *)
-(*           health -= amount;                                           *)
-(*           if (health == 0) { destroy:; }                              *)
+(*       fixed distanceTo: (Position other) {                            *)
+(*           var dx = x - other.x;                                       *)
+(*           var dy = y - other.y;                                       *)
+(*           return (Cork.Math abs: (dx + dy));                          *)
 (*       }                                                               *)
+(*   }                                                                   *)
 (*                                                                       *)
-(*       public update: {                                                *)
+(*   struct Enemy {                                                      *)
+(*       Position pos;                                                   *)
+(*       byte health = 3;                                                *)
+(*       bool active = false;                                            *)
+(*       byte animFrame = 0;                                             *)
+(*       Direction dir = Direction.down;                                  *)
+(*                                                                       *)
+(*       update: {                                                       *)
+(*           switch (dir) {                                              *)
+(*               case Direction.up:                                      *)
+(*                   pos.y -= 1.0;                                       *)
+(*               case Direction.down:                                    *)
+(*                   pos.y += 1.0;                                       *)
+(*               case Direction.left:                                    *)
+(*                   pos.x -= 1.0;                                       *)
+(*               case Direction.right:                                   *)
+(*                   pos.x += 1.0;                                       *)
+(*           }                                                           *)
+(*           if (pos.y > 250) { active = false; }                        *)
 (*           animFrame = (animFrame + 1) % 4;                            *)
 (*       }                                                               *)
+(*                                                                       *)
+(*       takeDamage: (byte amount) {                                     *)
+(*           if (amount >= health) {                                     *)
+(*               health = 0;                                             *)
+(*               active = false;                                         *)
+(*           } else {                                                    *)
+(*               health -= amount;                                       *)
+(*           }                                                           *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       bool isAlive: {                                                 *)
+(*           return health > 0;                                          *)
+(*       }                                                               *)
 (*   }                                                                   *)
 (*                                                                       *)
+(*   struct Player {                                                     *)
+(*       Position pos;                                                   *)
+(*       byte health = 5;                                                *)
+(*       byte score = 0;                                                 *)
+(*                                                                       *)
+(*       handleInput: {                                                  *)
+(*           if (joystick.port2.left)  { pos.x -= 1.5; }                *)
+(*           if (joystick.port2.right) { pos.x += 1.5; }                *)
+(*           if (joystick.port2.up)    { pos.y -= 1.5; }                *)
+(*           if (joystick.port2.down)  { pos.y += 1.5; }                *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       respawn: {                                                      *)
+(*           pos moveTo: 160 y: 200;                                     *)
+(*           health = 5;                                                 *)
+(*       }                                                               *)
+(*   }                                                                   *)
+(*                                                                       *)
+(*   // === Entry Scene ===                                              *)
 (*   entry scene TitleScreen {                                           *)
 (*       hardware {                                                      *)
 (*           border: Color.blue;                                         *)
@@ -874,29 +882,100 @@ const_expression = expression ;
 (*           color: Color.white;                                         *)
 (*       }                                                               *)
 (*                                                                       *)
+(*       sbyte logoDirection = 1;                                        *)
+(*                                                                       *)
 (*       enter {                                                         *)
 (*           Music play: titleTheme;                                     *)
 (*           logo.visible = true;                                        *)
 (*       }                                                               *)
 (*                                                                       *)
 (*       frame {                                                         *)
-(*           if (joystick.port2.fire) { go GameLevel; }                  *)
-(*       }                                                               *)
+(*           logo.y += logoDirection;                                    *)
+(*           if (logo.y > 200) { logoDirection = -1; }                   *)
+(*           if (logo.y < 50)  { logoDirection = 1; }                    *)
 (*                                                                       *)
-(*       exit { Music stop:; }                                           *)
-(*   }                                                                   *)
-(*                                                                       *)
-(*   scene GameLevel {                                                   *)
-(*       Enemy[8] enemies;                                               *)
-(*                                                                       *)
-(*       relaxed frame {                                                 *)
-(*           for (enemy in enemies) {                                    *)
-(*               if (enemy.active) { enemy update:; }                    *)
+(*           if (joystick.port2.fire) {                                  *)
+(*               go GameLevel;                                           *)
 (*           }                                                           *)
 (*       }                                                               *)
 (*                                                                       *)
 (*       raster 200 {                                                    *)
+(*           vic.border = Color.red;                                     *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       exit {                                                          *)
+(*           Music stop:;                                                *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       drawStarfield: {                                                *)
+(*           // scene-local helper method                                *)
+(*       }                                                               *)
+(*   }                                                                   *)
+(*                                                                       *)
+(*   // === Game Scene ===                                               *)
+(*   scene GameLevel {                                                   *)
+(*       hardware {                                                      *)
+(*           border: Color.black;                                        *)
+(*           background: Color.blue;                                     *)
+(*           mode: multicolorText;                                       *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       charset gameFont = import("game-font.bin");                     *)
+(*       sound explosion = import("boom.sfx");                           *)
+(*                                                                       *)
+(*       Player player;                                                  *)
+(*       Enemy[8] enemies;                                               *)
+(*       byte aliveCount = 0;                                            *)
+(*                                                                       *)
+(*       enter {                                                         *)
+(*           Music play: gameTheme;                                      *)
+(*           player respawn:;                                            *)
+(*                                                                       *)
+(*           // Initialize enemies with varied positions                 *)
+(*           var e = Enemy {                                             *)
+(*               pos = Position { x = 50, y = 0 },                      *)
+(*               health = 5,                                             *)
+(*               active = true                                           *)
+(*           };                                                          *)
+(*           enemies[0] = e;                                             *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       relaxed frame {                                                 *)
+(*           player handleInput:;                                        *)
+(*                                                                       *)
+(*           aliveCount = 0;                                             *)
+(*           for (enemy in enemies) {                                    *)
+(*               if (!enemy.active) { continue; }                        *)
+(*               enemy update:;                                          *)
+(*               aliveCount += 1;                                        *)
+(*                                                                       *)
+(*               if ((enemy.pos distanceTo: player.pos) < 8) {          *)
+(*                   player.health -= 1;                                 *)
+(*                   enemy takeDamage: 10;                               *)
+(*                   Sound play: explosion onVoice: 3;                   *)
+(*               }                                                       *)
+(*           }                                                           *)
+(*                                                                       *)
+(*           if (player.health == 0) {                                   *)
+(*               go TitleScreen;                                         *)
+(*           }                                                           *)
+(*                                                                       *)
+(*           if (aliveCount == 0) {                                      *)
+(*               currentLevel += 1;                                      *)
+(*               go GameLevel;                                           *)
+(*           }                                                           *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       raster 0 {                                                      *)
+(*           vic.border = Color.blue;                                    *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       raster 200 {                                                    *)
 (*           vic.border = Color.black;                                   *)
+(*       }                                                               *)
+(*                                                                       *)
+(*       exit {                                                          *)
+(*           Music stop:;                                                *)
 (*       }                                                               *)
 (*   }                                                                   *)
 

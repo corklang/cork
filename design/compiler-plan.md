@@ -26,7 +26,7 @@ Cork.sln
 - `Cork.Language.Lexing` -- Token, TokenKind, Lexer, SourceLocation
 - `Cork.Language.Parsing` -- Parser, all AST node types
 - `Cork.Language.Ast` -- Node base class, visitor interfaces
-- `Cork.Language.Semantics` -- TypeChecker, ScopeResolver, NullSafetyAnalyzer, MemoryCalculator, LifetimeAnalyzer
+- `Cork.Language.Semantics` -- TypeChecker, ScopeResolver, MemoryCalculator, StructSizeCalculator
 
 **Namespace layout within Cork.CodeGen:**
 - `Cork.CodeGen.Ir` -- IR instructions, basic blocks, control flow graph
@@ -80,7 +80,7 @@ What Phase 1 builds:
 - Direct 6510 code emission (no IR yet -- straight to bytes)
 - PRG output with BASIC stub
 - Memory layout: fixed addresses (code at $0810, data after code)
-- No OOP, no classes, no reference counting, no message passing
+- No structs, no message passing yet
 
 **Phase 2 -- Message Passing and Functions**
 
@@ -161,22 +161,16 @@ What Phase 3 adds:
 - Word (16-bit) arithmetic codegen
 - Fixed-point type support
 
-**Phase 4 -- Object-Oriented Programming**
+**Phase 4 -- Structs**
 
 Milestone program:
 ```cork
-class Bullet {
-    public byte x = 0;
-    public byte y = 0;
-    public bool active = false;
+struct Bullet {
+    byte x = 0;
+    byte y = 0;
+    bool active = false;
 
-    ctor atX: (byte startX) atY: (byte startY) {
-        x = startX;
-        y = startY;
-        active = true;
-    }
-
-    public update: {
+    update: {
         if (active) {
             y -= 2;
             if (y < 5) { active = false; }
@@ -186,34 +180,29 @@ class Bullet {
 
 entry scene Game {
     Bullet[4] bullets;
-    // ...
+
+    frame {
+        for (b in bullets) {
+            b update:;
+        }
+    }
 }
 ```
 
 What Phase 4 adds:
-- Class declarations (fields, methods, constructors)
-- Object layout in memory (struct-of-arrays for cache efficiency on 6510)
-- Property access via dot syntax
-- `this` reference
-- Object arrays
-- Static dispatch (no vtables yet)
-- Null safety analysis
+- Struct declarations (fields with defaults, methods)
+- Struct initializer syntax: `Bullet { x = 100, y = 50, active = true }`
+- Struct-of-arrays memory layout for arrays
+- Field access via dot syntax
+- `this` reference in struct methods
+- Struct arrays
+- All dispatch is static (no vtables, no indirection)
+- Composition (structs containing other structs)
 - `var` type inference
 
-**Phase 5 -- Inheritance, Interfaces, Static Ownership**
+**Phase 5 -- Hardware SDK**
 
 What Phase 5 adds:
-- Single inheritance
-- Interfaces
-- Abstract classes and abstract methods
-- Virtual dispatch (vtable-based)
-- Static ownership validation (compile-time borrow checking)
-- Nullable types and null-conditional operator (`?.`)
-- `new` expressions (objects placed in static/array slots, not heap)
-
-**Phase 6 -- Hardware SDK**
-
-What Phase 6 adds:
 - Sprite declarations (declarative blocks mapping to VIC-II registers)
 - Sprite collision detection intrinsics
 - Raster interrupt blocks (compiler-generated IRQ chain)
@@ -221,9 +210,9 @@ What Phase 6 adds:
 - Charset imports and VIC-II bank configuration
 - Cycle budget estimation for frame blocks
 
-**Phase 7 -- Output Formats and Polish**
+**Phase 6 -- Output Formats and Polish**
 
-What Phase 7 adds:
+What Phase 6 adds:
 - D64 disk image generation (for multi-scene programs that need scene loading from disk)
 - CRT cartridge image generation
 - Comprehensive error messages with source locations
@@ -261,7 +250,7 @@ Note: The `object?` for `LiteralValue` boxes value types on the heap. For AOT, t
 
 ```
 // Literals
-IntegerLiteral, FixedLiteral, StringLiteral, TrueLiteral, FalseLiteral, NullLiteral
+IntegerLiteral, FixedLiteral, StringLiteral, TrueLiteral, FalseLiteral
 
 // Identifiers and keywords
 Identifier,
@@ -281,7 +270,7 @@ HardwareKw, EnterKw, FrameKw, RelaxedKw, RasterKw, ExitKw,
 ThisKw, ValueKw,
 
 // Punctuation
-Semicolon, Comma, Dot, QuestionDot,
+Semicolon, Comma, Dot,
 OpenParen, CloseParen, OpenBrace, CloseBrace, OpenBracket, CloseBracket,
 
 // Operators
@@ -292,7 +281,6 @@ Less, Greater, LessEqual, GreaterEqual, EqualEqual, BangEqual,
 ShiftLeft, ShiftRight,
 Equal, PlusEqual, MinusEqual, StarEqual, SlashEqual, PercentEqual,
 AmpEqual, PipeEqual, CaretEqual, ShiftLeftEqual, ShiftRightEqual,
-QuestionMark,
 
 // The critical one
 Colon,
@@ -305,7 +293,7 @@ Eof
 
 The colon is just `Colon` at the lexer level. The lexer does NOT try to distinguish "selector colon" from "enum backing type colon" or "switch case colon" -- that is the parser's job. The lexer emits a plain `Colon` token every time it sees `:`.
 
-However, the lexer DOES need to handle `?.` as a single `QuestionDot` token, since it must not be parsed as `Question` + `Dot`. The rule: if `?` is immediately followed by `.`, emit `QuestionDot`. Otherwise emit `QuestionMark`.
+Cork has no nullable types or null-conditional operators, so `?` is not a valid token.
 
 **Handling `selector:` (identifier immediately before colon):**
 
@@ -337,7 +325,7 @@ The parser is a **hand-written recursive descent parser**. This is the right cho
 **Challenge 1: Distinguishing statements that start with an identifier.**
 
 When the parser sees an identifier at statement position, it could be:
-- A variable declaration: `byte x = 5;` or `Enemy target = null;`
+- A variable declaration: `byte x = 5;` or `Enemy target;`
 - An assignment: `x = 5;` or `enemy.health -= 1;`
 - A message send: `enemy update:;` or `enemy moveTo: 100 y: 50;`
 - An expression statement: `someFunction:;` (though this is also a message send)
@@ -430,9 +418,7 @@ ImportNode                 -- path: string, isLibrary: bool
 GlobalVarDeclNode          -- type, name, initializer
 ResourceDeclNode           -- hardwareType, name, importPath
 EnumDeclNode               -- name, backingType, isFlags, members[]
-ClassDeclNode              -- name, baseClass?, interfaces[], members[]
-AbstractClassDeclNode      -- (extends ClassDeclNode)
-InterfaceDeclNode          -- name, parents[], members[]
+StructDeclNode             -- name, fields[], methods[]
 SceneDeclNode              -- name, isEntry, members[]
 ```
 
@@ -450,14 +436,11 @@ ExitBlockNode              -- body: BlockNode
 SceneMethodNode            -- (same as method decl)
 ```
 
-**Class member nodes:**
+**Struct member nodes:**
 
 ```
-FieldNode                  -- access, type, name, initializer?
-PropertyNode               -- access, type, name, getter?, setter?
-MethodNode                 -- access, returnType?, selector: SelectorSegment[], body
-ConstructorNode            -- access, selector: SelectorSegment[], body
-AbstractMethodNode         -- access, returnType?, selector: SelectorSegment[]
+FieldNode                  -- type, name, initializer?
+MethodNode                 -- returnType?, selector: SelectorSegment[], body
 ```
 
 **Method signature representation:**
@@ -504,14 +487,13 @@ IntLiteralExpr             -- value: long, inferredType (byte or word)
 FixedLiteralExpr           -- value: double (stored as 8.8 fixed internally)
 StringLiteralExpr          -- value: string
 BoolLiteralExpr            -- value: bool
-NullLiteralExpr
 ThisExpr
 IdentifierExpr             -- name: string
 BinaryExpr                 -- left, op, right
 UnaryExpr                  -- op, operand
-MemberAccessExpr           -- receiver, memberName, isNullConditional
+MemberAccessExpr           -- receiver, memberName
 IndexExpr                  -- receiver, index
-MessageSendExpr            -- receiver, isNullConditional, segments: (name, arg?)[]
+MessageSendExpr            -- receiver, segments: (name, arg?)[]
 NewExpr                    -- typeName, segments: (name, arg?)[]  (empty for no-arg)
 ArrayInitializerExpr       -- elements: ExprNode[]
 ResourceImportExpr         -- path: string
@@ -539,7 +521,7 @@ Semantic analysis is performed as a series of passes over the AST. Each pass is 
 
 **Pass 1: Symbol Registration (`SymbolRegistrar`)**
 
-Walks the top level of the AST and registers all type names (classes, enums, interfaces), scene names, and global variables into a global `SymbolTable`. This is needed before any other pass because the parser needs to know what identifiers are types vs variables.
+Walks the top level of the AST and registers all type names (structs, enums), scene names, and global variables into a global `SymbolTable`. This is needed before any other pass because the parser needs to know what identifiers are types vs variables.
 
 This pass does NOT descend into method bodies. It only registers declarations.
 
@@ -572,20 +554,11 @@ Key type rules:
 
 Type inference for `var`: the initializer's type becomes the variable's type.
 
-**Pass 4: Null Safety (`NullSafetyAnalyzer`)**
-
-Tracks which variables are nullable (`Type?`) and performs flow-sensitive null analysis:
-- After `if (x != null) { ... }`, inside the block `x` is treated as non-nullable.
-- Accessing a method or property on a nullable without a null check or `?.` is a compile error.
-- Assigning `null` to a non-nullable is a compile error.
-
-This uses a simple dataflow approach: maintain a set of "known non-null" variables at each program point. Branch conditions like `x != null` add to the set; re-assignment of `x` removes it.
-
-**Pass 5: Constant Evaluation (`ConstEvaluator`)**
+**Pass 4: Constant Evaluation (`ConstEvaluator`)**
 
 Evaluates `const` declarations, enum member values, and array size expressions. These must all be compile-time constants. Errors if a const expression references a non-const value or cannot be computed.
 
-**Pass 6: Memory Size Calculation (`MemorySizeCalculator`)**
+**Pass 5: Memory Size Calculation (`MemorySizeCalculator`)**
 
 Calculates the byte size of every type, every global variable, every scene's local data, every class instance, and every resource import. Sums these into:
 - `globalSize`: total bytes for global data + code
@@ -595,21 +568,9 @@ Then validates: for each scene, `globalSize + sceneSize[scene] <= availableMemor
 
 If the validation fails, emit `CORK001` with a breakdown.
 
-**Pass 7: Ownership Analysis (`OwnershipAnalyzer`)**
+**Pass 6: Struct Size Calculator (`StructSizeCalculator`)**
 
-Validates that all references (borrows) are safe at compile time. Every object has a single owner (global scope, scene scope, or array slot). References to objects must not outlive their owner.
-
-The analyzer checks:
-- A reference obtained from an array slot (e.g., `var e = enemies[3];`) does not escape the scope where the array is accessible.
-- A reference passed as a method argument does not get stored somewhere that outlives the call.
-- A reference returned from a method is valid (the object it points to is still alive in the caller's scope).
-
-If the analyzer cannot prove safety, it emits a compile error:
-```
-error CORK010: Reference to 'enemy' may outlive its owner 'enemies' array.
-```
-
-This is a conservative analysis: when in doubt, reject. The developer can restructure their code to make ownership clear. In practice, Cork's fixed-size arrays, scene-scoped lifetimes, and lack of dynamic allocation make most patterns trivially safe.
+Calculates the byte size of every struct type, handling nested structs (composition). Validates that no struct has circular composition (struct A contains struct B which contains struct A). This information feeds into the memory size calculator and the struct-of-arrays layout generator.
 
 ---
 
@@ -670,9 +631,8 @@ IrStoreIndex(arrayBase, index, src)
 IrLoadHardwareReg(dest, address)     -- e.g., reading $D012
 IrStoreHardwareReg(address, src)     -- e.g., writing $D020
 
-// Calls
+// Calls (all static dispatch — no vtables)
 IrCall(dest?, selectorName, receiver?, args[])
-IrCallVirtual(dest?, vtableIndex, receiver, args[])
 
 // Object access (all statically allocated, no heap)
 IrObjectSlotAddress(dest, arrayBase, index, classSize)
@@ -758,58 +718,70 @@ No hardware multiply/divide. Options:
 - **Variable multiplies**: call a runtime library subroutine. For `byte * byte -> word`, use a 256-byte lookup table or shift-and-add loop (see research/math-and-algorithms.md).
 - **Division**: similarly delegated to a runtime subroutine.
 
-**OOP code generation:**
+**Struct code generation:**
 
-**Phase 4 (static dispatch only):** Classes are compiled as structs. Each field has a known offset. Method calls are compiled as direct `JSR` to the method's address, with the object's base address passed in a zero-page pointer. Since there is no inheritance yet, all dispatch is static.
+Structs have no indirection. Each field has a known offset. Method calls are compiled as direct `JSR` to the method's address, with the struct's base address passed via a zero-page pointer. All dispatch is static — no vtables, no virtual calls.
 
-Object layout in memory:
+**Single struct layout:**
 
 ```
-For class Enemy { byte health; byte x; byte y; bool active; }
+For struct Enemy { byte health; fixed x; fixed y; bool active; }
   offset 0: health (1 byte)
-  offset 1: x (1 byte)
-  offset 2: y (1 byte)
-  offset 3: active (1 byte)
-  Total: 4 bytes per instance
+  offset 1: x_lo (1 byte)
+  offset 2: x_hi (1 byte)
+  offset 3: y_lo (1 byte)
+  offset 4: y_hi (1 byte)
+  offset 5: active (1 byte)
+  Total: 6 bytes per instance
 ```
 
-For `Enemy[8]`, the compiler allocates 32 bytes contiguously. To access `enemies[i].health`:
+**Struct-of-arrays layout for arrays:**
+
+For `Enemy[8]`, the compiler uses struct-of-arrays -- storing all `health` bytes contiguously, all `x` values contiguously, etc. This allows fast indexed addressing:
 
 ```asm
-    LDA enemy_base_lo
-    CLC
-    ADC i_times_4       ; pre-computed or shift
-    STA ptr_lo
-    LDA enemy_base_hi
-    ADC #0
-    STA ptr_hi
-    LDY #0              ; offset of health field
-    LDA (ptr_lo),Y
+    ; enemies[i].health where i is in X register
+    LDA enemy_health,X     ; 4 cycles, no pointer indirection
+    
+    ; vs array-of-structs which would require:
+    ;   multiply i by struct size, add base, use indirect addressing
+    ;   ~15-20 cycles
 ```
 
-An alternative (and often faster) layout is **struct-of-arrays**: store all `health` bytes contiguously, all `x` bytes contiguously, etc. This is better for iteration patterns like `for (enemy in enemies) { enemy.x += 1; }` because each field access is `LDA health_array,X` (4 cycles, no pointer indirection). The compiler should use struct-of-arrays for fixed-size object arrays since it is strictly better for the 6510.
+Struct-of-arrays is strictly better for the 6510's indexed addressing modes and dominates C64 game programming patterns (iterating all enemies, all bullets, etc.).
 
-**Phase 5 (virtual dispatch):** For classes with inheritance, the compiler generates a vtable. Each class that has virtual methods (any method that is overridden, or methods on interfaces) gets a vtable -- a table of subroutine addresses.
+**Struct method calls:**
 
-Each object instance gets a 1-byte vtable index (not a pointer -- saving a byte per object). The vtable is a global array of method addresses. Virtual dispatch:
+Methods receive the struct's address (or array index for array elements) via a zero-page register. The method body accesses fields relative to this:
 
 ```asm
-    ; Load vtable index from object
-    LDY #0              ; offset of vtable_index field (always first)
-    LDA (obj_ptr),Y
-    TAX
-    ; Load method address from vtable
-    LDA vtable_lo,X
-    STA jsr_target_lo
-    LDA vtable_hi,X
-    STA jsr_target_hi
-    ; Call via indirect jump (self-modifying code or JMP (indirect))
-    JSR dispatch_trampoline
+    ; enemy update:;  where enemy is at known static address
+    LDA #<enemy_base
+    STA zp_this_lo
+    LDA #>enemy_base
+    STA zp_this_hi
+    JSR Enemy_update        ; direct call, no indirection
+
+    ; enemies[i] update:;  where i is in X
+    STX zp_array_index
+    JSR Enemy_update_indexed ; method uses X to index struct-of-arrays
 ```
 
-This costs about 20-25 cycles per virtual call. For hot paths, the compiler should prefer static dispatch (devirtualization) when the concrete type is known.
+**Struct initializer codegen:**
 
-**Devirtualization:** When the compiler can prove the concrete type at a call site (e.g., the variable was just assigned from `new Enemy:` with no intervening reassignment), it emits a direct `JSR` instead of virtual dispatch. The lifetime analyzer / type flow analysis provides this information.
+`var e = Enemy { health = 10, x = 100 };` generates code only for non-default values:
+
+```asm
+    ; health defaults to 3, but we want 10
+    LDA #10
+    STA enemy_health
+    ; x defaults to 0, but we want 100
+    LDA #100
+    STA enemy_x_lo
+    LDA #0
+    STA enemy_x_hi
+    ; y and active keep their defaults (0/false) — no code emitted
+```
 
 **Static ownership (no reference counting):**
 
@@ -1051,7 +1023,7 @@ irq_handler:
 
 - **Lexer tests**: Feed source strings, assert token sequences. Cover every token type, edge cases (hex literals, fixed-point literals, underscores in numbers, string escapes, comment stripping, `?.` vs `?` + `.`).
 - **Parser tests**: Feed token sequences (or source strings through the lexer), assert AST structure. One test per grammar production. Test error recovery for malformed input.
-- **Semantic analysis tests**: Feed ASTs, assert that type checking passes or produces specific errors. Test null safety (expect error when accessing nullable without check, expect pass with check). Test scope resolution (variable not found, duplicate declaration). Test const evaluation.
+- **Semantic analysis tests**: Feed ASTs, assert that type checking passes or produces specific errors. Test scope resolution (variable not found, duplicate declaration). Test const evaluation. Test struct size calculation and composition validation.
 
 **Unit tests (Cork.CodeGen.Tests):**
 
@@ -1156,17 +1128,16 @@ Enable the `ILLink` trimming analyzer and AOT analyzer as warnings-as-errors dur
 | 1 | "HELLO WORLD" on screen (poke characters) | Lexer, Parser (subset), AST, direct codegen, PRG output |
 | 2 | Player moves with joystick | Message-passing calls, scene methods, input, frame loop |
 | 3 | Title screen -> Game -> Game Over flow | Enums, multiple scenes, `go`, 16-bit math, memory validation |
-| 4 | Array of game entities with methods | Classes, constructors, fields, struct-of-arrays layout |
-| 5 | Inheritance-based entity hierarchy | Inheritance, interfaces, vtables, static ownership, null safety |
-| 6 | Full game with sprites, music, raster splits | Hardware SDK, sprite codegen, SID, raster IRQs, cycle estimation |
-| 7 | Polished multi-scene game on D64 | D64/CRT output, optimizations, full diagnostics |
+| 4 | Struct-based game entities | Structs, fields, methods, struct-of-arrays layout, composition |
+| 5 | Full game with sprites, music, raster splits | Hardware SDK, sprite codegen, SID, raster IRQs, cycle estimation |
+| 6 | Polished multi-scene game on D64 | D64/CRT output, optimizations, full diagnostics |
 
 ---
 
 ### Critical Files for Implementation
 
 - `/Users/js/c64-gcode/design/grammar.ebnf` -- The formal grammar that the parser must implement production-by-production. Every parsing method maps to a production rule in this file.
-- `/Users/js/c64-gcode/design/language-design.md` -- The language specification that drives semantic analysis rules (type system, null safety, memory management, scene lifecycle).
+- `/Users/js/c64-gcode/design/language-design.md` -- The language specification that drives semantic analysis rules (type system, memory management, scene lifecycle).
 - `/Users/js/c64-gcode/research/6510-cpu.md` -- Instruction set reference needed to build the 6510 instruction encoder and cycle cost tables.
 - `/Users/js/c64-gcode/research/file-formats.md` -- PRG, D64, and CRT format specifications needed to implement all three output writers.
 - `/Users/js/c64-gcode/research/timing-and-optimization.md` -- Cycle counting rules and VIC-II stolen cycle data needed for the frame budget estimator.

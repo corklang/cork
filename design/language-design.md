@@ -2,7 +2,7 @@
 
 ## Vision
 
-Cork is a high-level, expressive programming language that compiles to Commodore 64 machine code. It pairs a modern developer experience — OOP, type inference, null safety, automatic memory management — with a built-in SDK that makes C64 hardware feel native to the language. The compiler, written in C# (.NET 10, AOT compatible), handles all the brutal realities of the 6510 CPU and 64KB address space so the developer can focus on their vision.
+Cork is a high-level, expressive programming language that compiles to Commodore 64 machine code. It pairs a modern developer experience — structs with methods, type inference, null safety, fully static memory management — with a built-in SDK that makes C64 hardware feel native to the language. The compiler, written in C# (.NET 10, AOT compatible), handles all the brutal realities of the 6510 CPU and 64KB address space so the developer can focus on their vision.
 
 **Primary audience:** Game developers who want productivity and expression.  
 **Secondary audience:** General application developers targeting the C64.
@@ -13,10 +13,11 @@ Cork is a high-level, expressive programming language that compiles to Commodore
 
 1. **Expression over ceremony** — The language should read clearly and feel good to write.
 2. **Compile-time everything** — Every safety feature (null checks, type checks, memory validation) is resolved at compile time. Zero runtime overhead for safety.
-3. **No manual memory management** — The compiler owns the memory map. Reference counting handles object lifetimes, with static lifetime analysis eliminating refcount overhead where possible.
+3. **Fully static memory** — No heap, no garbage collection, no reference counting. Every variable's size and location is known at compile time. The compiler owns the 64KB layout.
 4. **The hardware is the SDK** — C64 hardware (VIC-II, SID, CIA, sprites, raster interrupts) surfaces as declarative, first-class language constructs — not a bolted-on library.
 5. **Scenes as architecture** — Programs are organized into scenes that the compiler packs, validates, and loads automatically. If it doesn't fit in memory, it's a compiler error — not a runtime crash.
 6. **The colon means "invoke"** — The colon is the message-passing operator. It always means "I'm calling something." It never appears in type annotations or declarations.
+7. **Dot means data, colon means code** — `enemy.health` is always a direct field read. `enemy update:` is always a method call. No hidden costs behind either syntax.
 
 ---
 
@@ -30,15 +31,27 @@ byte score = 0;
 var speed = 1.5;                  // inferred as fixed
 const byte MAX_LIVES = 3;
 
+// Structs with field defaults
+struct Enemy {
+    fixed x = 0;
+    fixed y = 0;
+    byte health = 3;
+    bool active = false;
+}
+
+// Struct initialization
+var enemy = Enemy { health = 10, x = 100 };
+Enemy[8] enemies;                 // 8 enemies, all at defaults
+
 // Message-passing calls — colons signal invocation
 player moveTo: 100 y: 50;
-bullet spawn: player.x y: player.y heading: Direction.up;
+enemy takeDamage: (weapon.power + bonus);
 
 // No-arg calls — trailing colon
 player update:;
 Music stop:;
 
-// Property access — dot syntax
+// Property access — dot syntax, always direct field access
 var h = enemy.health;
 enemy.x = 100;
 ```
@@ -80,7 +93,6 @@ The type appears before the name. No colons in declarations. `var` enables type 
 byte x = 5;
 word score = 0;
 string name = "HELLO";
-Enemy? target = null;          // nullable
 
 // Inferred type
 var x = 5;                     // byte
@@ -92,31 +104,31 @@ const byte MAX_LIVES = 3;
 const MAX_ENEMIES = 8;         // inferred
 ```
 
-### Null Safety
+### No Null
 
-All types are non-nullable by default. Use `?` to mark a type as nullable. The compiler enforces null checks at compile time — zero runtime cost.
+Cork has no `null`. Every variable always exists and is initialized. Structs are value types — declaring one allocates it with field defaults. There is no "absence of a value."
+
+To represent optional presence, use an explicit flag:
 
 ```cork
-Enemy? target = null;          // nullable
-Enemy player = new Enemy:;     // non-nullable, must be initialized
-
-// Compiler error: target might be null
-target takeDamage: 1;
-
-// OK: null check
-if (target != null) {
-    target takeDamage: 1;
+struct Enemy {
+    bool active = false;
+    byte health = 3;
+    fixed x = 0;
+    fixed y = 0;
 }
 
-// OK: null-conditional
-target?.takeDamage: 1;
+// Check relevance explicitly
+if (enemy.active) {
+    enemy update:;
+}
 ```
 
 ### Fixed-Size Arrays
 
 ```cork
 byte[20] bullets;                        // 20-element byte array
-Enemy[8] enemies;                        // 8-element array of Enemy
+Enemy[8] enemies;                        // 8 enemies at field defaults
 const byte[256] sineTable = { ... };     // initialized constant array
 ```
 
@@ -168,11 +180,10 @@ Cork uses Smalltalk/Objective-C-style message passing for all method calls. The 
 | Call with args | `receiver segment: arg segment: arg;` |
 | Call with args in expression | `(receiver segment: arg segment: arg)` |
 | No-arg call | `receiver method:;` |
-| Property access | `receiver.property` |
-| Constructor (no-arg) | `new Type:;` |
-| Constructor (with args) | `new Type segment: arg segment: arg;` |
+| Field access | `receiver.field` |
+| Nested field access | `enemy.pos.x` |
 
-The colon means "I'm sending a message." The dot means "I'm accessing data."
+The colon means "I'm sending a message." The dot means "I'm accessing data." There is never ambiguity — dots are always direct field reads, colons are always method calls.
 
 ### Method Calls
 
@@ -224,124 +235,136 @@ byte distanceFromX: (byte x) toY: (byte y) {
 // The full method identity is its segment names: "distanceFromX:toY:"
 ```
 
-### Constructors
-
-Declared with `ctor`. Called with `new Type`.
-
-```cork
-class Enemy : GameEntity, IDamageable {
-    private byte health;
-    private byte x;
-
-    // No-arg constructor
-    ctor: {
-        health = 3;
-        x = 0;
-    }
-
-    // Named constructor
-    ctor withHealth: (byte h) atX: (byte startX) {
-        health = h;
-        x = startX;
-    }
-}
-
-// Usage:
-var e1 = new Enemy:;
-var e2 = new Enemy withHealth: 100 atX: 50;
-```
-
 ---
 
-## Object-Oriented Programming
+## Structs
 
-### Classes
+Structs are Cork's only composite type. They are value types with known size at compile time. All fields are public. Structs can have methods.
 
-Single inheritance, multiple interfaces. C#-style syntax.
+### Declaration
 
 ```cork
-class Enemy : GameEntity, IDamageable {
-    private byte health = 3;
-    private byte animFrame = 0;
+struct Enemy {
+    fixed x = 0;
+    fixed y = 0;
+    byte health = 3;
+    bool active = false;
+    byte animFrame = 0;
 
-    public takeDamage: (byte amount) {
-        health -= amount;
-        if (health == 0) {
-            destroy:;
-        }
-    }
-
-    public update: {
+    update: {
+        y += 1.0;
+        if (y > 250) { active = false; }
         animFrame = (animFrame + 1) % 4;
     }
-}
-```
 
-### Interfaces
+    takeDamage: (byte amount) {
+        health -= amount;
+        if (health == 0) { active = false; }
+    }
 
-```cork
-interface IDamageable {
-    takeDamage: (byte amount);
-    byte health { get; }
-}
+    bool isAlive: {
+        return health > 0;
+    }
 
-interface IAnimatable {
-    animate:;
-}
-```
-
-### Abstract Classes
-
-```cork
-abstract class GameEntity {
-    public fixed x = 0;
-    public fixed y = 0;
-    public bool active = false;
-
-    public abstract update:;
-
-    public fixed distanceTo: (GameEntity other) {
+    fixed distanceTo: (Enemy other) {
         // ...
     }
 }
 ```
 
-### Properties
+### Initialization
 
-Zero-cost when trivial (compiled to direct field access). Only generates method calls when custom logic is present.
+Declaring a struct variable gives it field defaults. Use initializer syntax to override specific fields:
 
 ```cork
-class Paddle {
-    private byte _x = 0;
+// All defaults
+Enemy enemy;
 
-    // Trivial — compiles to direct field access
-    public byte y { get; set; }
+// Override specific fields — only these emit code
+var enemy = Enemy { health = 10, x = 100, y = 50 };
 
-    // Custom logic — compiles to method calls
-    public byte x {
-        get { return _x; }
-        set {
-            _x = (value clamp: 0 max: 255);
-        }
-    }
-}
+// Array of structs — all at defaults
+Enemy[8] enemies;
 ```
 
-### Access Modifiers
+The compiler is smart: only non-default values emit code. If `health` defaults to 3 and you write 10, it sets 10. Fields you don't mention keep their defaults with no code generated.
 
-| Modifier    | Visibility                                |
-|-------------|-------------------------------------------|
-| `public`    | Accessible from anywhere                  |
-| `private`   | Accessible only within the declaring type |
-| `protected` | Accessible within the type and subclasses |
+### Methods
+
+Methods on structs receive an implicit `this` reference. They are always statically dispatched (no vtables, no indirection).
+
+```cork
+struct Player {
+    fixed x = 160;
+    fixed y = 200;
+    byte health = 5;
+
+    handleInput: {
+        if (joystick.port2.left)  { x -= 1.5; }
+        if (joystick.port2.right) { x += 1.5; }
+        if (joystick.port2.up)    { y -= 1.5; }
+        if (joystick.port2.down)  { y += 1.5; }
+    }
+}
+
+// Usage
+Player player;
+player handleInput:;        // calls handleInput with implicit this = &player
+player.x;                   // direct field access, no method call
+```
+
+### Composition
+
+Code reuse is achieved through composition, not inheritance:
+
+```cork
+struct Position {
+    fixed x = 0;
+    fixed y = 0;
+
+    moveTo: (fixed newX) y: (fixed newY) {
+        x = newX;
+        y = newY;
+    }
+}
+
+struct Enemy {
+    Position pos;
+    byte health = 3;
+    bool active = false;
+
+    update: {
+        pos.y += 1.0;
+        if (pos.y > 250) { active = false; }
+    }
+}
+
+// Usage
+var enemy = Enemy { pos = Position { x = 100, y = 0 }, health = 5 };
+enemy.pos.x;                // nested field access
+enemy update:;              // method call
+```
+
+### Struct-of-Arrays Optimization
+
+For arrays of structs, the compiler uses struct-of-arrays layout internally. `Enemy[8]` is stored as parallel arrays:
+
+```
+enemy_x[8]       — all x values contiguous
+enemy_y[8]       — all y values contiguous  
+enemy_health[8]  — all health values contiguous
+enemy_active[8]  — all active flags contiguous
+```
+
+This allows the 6510 to iterate fields with fast indexed addressing (`LDA health_array,X`) instead of pointer arithmetic. The developer writes `enemies[i].health` and the compiler translates it to the optimal access pattern.
 
 ---
 
 ## Memory Management
 
-### Static Ownership
+### Fully Static
 
-Cork uses fully static ownership — no reference counting, no heap allocator, no garbage collection. Every object's lifetime is known at compile time. Zero runtime overhead.
+Cork has no heap, no garbage collection, no reference counting. Every variable's size and memory location is determined at compile time.
 
 Objects live in one of three places:
 
@@ -349,17 +372,9 @@ Objects live in one of three places:
 |-------|----------|---------|
 | **Global** | Entire program | `word highScore = 0;` |
 | **Scene** | While scene is active | Scene-local variables and resources |
-| **Array slot** | Lifetime of the array | `Enemy[8] enemies;` owns its 8 enemies |
+| **Local** | Current scope/block | Function-local variables |
 
-References to objects are **borrows** — the compiler proves at compile time that no reference outlives its owner. If it can't prove this, it's a compile error.
-
-```cork
-Enemy[8] enemies;
-var target = enemies[3];      // borrow — compiler proves target
-                              // doesn't outlive the array
-target takeDamage: 1;         // OK: array is still alive
-// target goes out of scope — nothing to free
-```
+All struct instances are value types. Assigning a struct copies it. Arrays of structs own their elements. There is no indirection, no pointers, no shared mutable state.
 
 ### No Manual Memory
 
@@ -380,7 +395,7 @@ Every scene has built-in lifecycle phases. These are **keywords**, not methods.
 | `enter`          | Runs once when the scene becomes active             |
 | `frame`          | Runs every frame — compiler **errors** if estimated cycle budget overruns |
 | `relaxed frame`  | Runs every frame — compiler **warns** but allows potential overruns |
-| `raster N`| Runs at a specific rasterline (compiler wires IRQ)  |
+| `raster N`       | Runs at a specific rasterline (compiler wires IRQ)  |
 | `exit`           | Runs once before leaving the scene                  |
 
 #### Frame Budget Validation
@@ -398,13 +413,13 @@ Entity dispatch is manual — the developer loops explicitly. No magic, no hidde
 
 ```cork
 frame {
-    for (enemy in enemies) {
-        if (enemy.active) {
-            enemy update:;
+    player handleInput:;
+    for (e in enemies) {
+        if (e.active) {
+            e update:;
         }
     }
     checkCollisions:;
-    updateHud:;
 }
 ```
 
@@ -414,17 +429,14 @@ Exactly one scene must be marked `entry`. This is where the program starts.
 
 ```cork
 entry scene TitleScreen {
-    // Hardware configuration — declarative block
     hardware {
         border: Color.blue;
         background: Color.black;
         mode: text;
     }
 
-    // Resources owned by this scene
     charset font = import("font.bin");
 
-    // Nested hardware declarations
     sprite logo {
         data: import("logo.spr");
         x: 160;
@@ -432,13 +444,17 @@ entry scene TitleScreen {
         color: Color.white;
     }
 
+    sbyte logoDirection = 1;
+
     enter {
         Music play: titleTheme;
         logo.visible = true;
     }
 
     frame {
-        logo.y += (Sin lookup: time) * 2;
+        logo.y += logoDirection;
+        if (logo.y > 200) { logoDirection = -1; }
+        if (logo.y < 50)  { logoDirection = 1; }
 
         if (joystick.port2.fire) {
             go GameLevel;
@@ -446,7 +462,7 @@ entry scene TitleScreen {
     }
 
     raster 200 {
-        border: Color.red;
+        vic.border = Color.red;
     }
 
     exit {
@@ -454,7 +470,7 @@ entry scene TitleScreen {
     }
 
     // Scene-private helper methods
-    spawnStars: {
+    drawStarfield: {
         // ...
     }
 }
@@ -473,7 +489,6 @@ The compiler handles unloading the current scene's resources and loading the nex
 Resources and state declared outside any scene are always in memory and accessible from all scenes.
 
 ```cork
-// Always in memory
 charset systemFont = import("system-font.bin");
 music titleTheme = import("title.sid");
 music gameTheme = import("game.sid");
@@ -548,7 +563,7 @@ player.x += 2;
 player.visible = true;
 player.frame = walkAnimation[frameIndex];
 
-// Collision (compiler reads and clears hardware registers correctly)
+// Collision
 if (player collidesWith: enemy) {
     // ...
 }
@@ -557,12 +572,10 @@ if (player collidesWith: enemy) {
 ### SID (Sound)
 
 ```cork
-// Music — import and play SID files
 music bgm = import("music.sid");
 Music play: bgm;
 Music stop:;
 
-// Sound effects
 sound explosion = import("boom.sfx");
 Sound play: explosion onVoice: 3;
 ```
@@ -570,14 +583,12 @@ Sound play: explosion onVoice: 3;
 ### Input
 
 ```cork
-// Joystick
 if (joystick.port2.up)    { player.y -= speed; }
 if (joystick.port2.down)  { player.y += speed; }
 if (joystick.port2.left)  { player.x -= speed; }
 if (joystick.port2.right) { player.x += speed; }
 if (joystick.port2.fire)  { shoot:; }
 
-// Keyboard
 if (keyboard pressed: Key.space) { jump:; }
 if (keyboard down: Key.f1)       { pause:; }
 ```
@@ -590,12 +601,10 @@ Declared as part of the scene. The compiler handles all the IRQ setup, chaining,
 scene GameLevel {
     raster 0 {
         vic.border = Color.blue;
-        vic.background = Color.blue;
     }
 
     raster 200 {
         vic.border = Color.black;
-        vic.background = Color.black;
     }
 }
 ```
@@ -670,6 +679,19 @@ for (enemy in enemies) {
 }
 ```
 
+### Continue and Break
+
+```cork
+for (enemy in enemies) {
+    if (!enemy.active) { continue; }
+    enemy update:;
+}
+
+while (true) {
+    if (done) { break; }
+}
+```
+
 ### Switch (no fallthrough — safe default)
 
 No `break` needed. Each case is independent. Supports both constant and expression cases.
@@ -687,14 +709,12 @@ switch (direction) {
         player.x += 1;
 }
 
-// Expression cases — compiler generates if/else chain (same performance)
+// Expression cases — compiler generates if/else chain
 switch (true) {
     case health < 10:
         flashWarning:;
     case health < 30:
         showDamage:;
-    case armor > 50:
-        showShield:;
     default:
         showNormal:;
 }
@@ -758,7 +778,6 @@ The compiler automatically generates:
 - Memory layout
 - Scene packing and load addresses
 - Raster IRQ setup code
-- Reference counting runtime (minimal, only if needed)
 
 ---
 
@@ -779,6 +798,9 @@ Cork uses keyword modifiers for variant behavior. This is a consistent pattern t
 
 | Feature              | Reason                                         |
 |----------------------|------------------------------------------------|
+| Classes              | Structs with methods cover all use cases        |
+| Inheritance          | Composition is simpler and C64-appropriate      |
+| Interfaces           | Not needed without polymorphic dispatch          |
 | Inline assembly      | Language should be expressive enough without it |
 | Generics             | Complexity not justified for 8-bit target      |
 | Lambdas/closures     | Runtime cost too high, implementation complex   |
@@ -786,21 +808,26 @@ Cork uses keyword modifiers for variant behavior. This is a consistent pattern t
 | Dynamic arrays       | Fixed-size only; 64KB demands predictability    |
 | Exceptions           | Runtime overhead; errors are compile-time       |
 | Manual memory mgmt   | Compiler owns the memory map                   |
-| Garbage collection   | Static ownership — all lifetimes compile-time   |
-| Reference counting   | Static ownership eliminates the need entirely   |
-| Heap allocation      | All objects are static, scene-scoped, or array-owned |
+| Garbage collection   | Fully static memory — all lifetimes compile-time |
+| Reference counting   | Fully static memory eliminates the need         |
+| Heap allocation      | All objects are static, scene-scoped, or local  |
+| Null                 | All values always exist; use `bool active` patterns |
+| Nullable types       | No null means no need for `Type?` or `?.`       |
+| Properties           | Direct field access (dot) and methods (colon) are clearer |
 | `func` keyword       | Method signatures are self-evident              |
 | Dot-enum shorthand   | Always use `Type.value` for clarity             |
+| Access modifiers     | Everything is public                            |
+| Constructors         | Field defaults + initializer syntax             |
 
 ---
 
 ## Open Questions for Future Discussion
 
 1. **Error handling for I/O** — Scene loading can fail (disk error). How should this surface? A built-in retry/error screen? A callback?
-2. **Generics** — Could be valuable for container types in a future version.
-3. **Debugging support** — Source-level debugging in VICE? Source maps?
-4. **Standard library scope** — What math, string, and utility functions ship built-in?
-5. **Build system** — CLI tool? Project file format? Watch mode?
-6. **Advanced graphics modes** — How do bitmap mode, FLI, sprite multiplexing surface in the language?
-7. **Optimization hints** — Can the developer annotate hot paths or suggest memory placement?
-8. **Library system** — How are libraries authored, versioned, and distributed?
+2. **Debugging support** — Source-level debugging in VICE? Source maps?
+3. **Standard library scope** — What math, string, and utility functions ship built-in?
+4. **Build system** — CLI tool? Project file format? Watch mode?
+5. **Advanced graphics modes** — How do bitmap mode, FLI, sprite multiplexing surface in the language?
+6. **Optimization hints** — Can the developer annotate hot paths or suggest memory placement?
+7. **Library system** — How are libraries authored, versioned, and distributed?
+8. **Type casting** — Implicit widening (byte -> word)? Explicit narrowing? Syntax?
