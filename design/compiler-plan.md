@@ -5,22 +5,27 @@
 The solution should be a single .NET 10 solution with five projects, organized to keep the compiler pipeline cleanly separated:
 
 ```
-Cork.sln
+Cork.slnx                       -- .slnx solution format
+global.json                      -- Required for MTP (Microsoft Testing Platform) + dotnet test
   src/
-    Cork.Compiler/          -- Main entry point, CLI driver
-    Cork.Language/           -- Lexer, Parser, AST, Semantic Analysis
-    Cork.CodeGen/            -- IR, 6510 code generation, memory layout
-    Cork.Output/             -- .prg, .d64, .crt emitters
-    Cork.Runtime/            -- Runtime library source (6510 asm as embedded resources)
+    Cork.Compiler/               -- Main entry point, CLI driver
+    Cork.Language/               -- Lexer, Parser, AST, Semantic Analysis
+    Cork.CodeGen/                -- IR, 6510 code generation, memory layout
+    Cork.Output/                 -- .prg, .d64, .crt emitters
+    Cork.Runtime/                -- Runtime library source (6510 asm as embedded resources)
   tests/
-    Cork.Language.Tests/     -- Lexer, parser, semantic analysis unit tests
-    Cork.CodeGen.Tests/      -- Code generation unit tests
-    Cork.Integration.Tests/  -- End-to-end: Cork source -> .prg -> VICE verification
+    Cork.Language.Tests/         -- Lexer, parser, semantic analysis tests (TUnit)
+    Cork.CodeGen.Tests/          -- Code generation tests (TUnit)
+    Cork.Integration.Tests/      -- End-to-end: Cork source -> .prg -> VICE (TUnit)
   samples/
     hello.cork
     bouncing-ball.cork
     title-game.cork
 ```
+
+**Testing framework:** TUnit with TUnit.Mocks, running on MTP. A `global.json` at the solution root is required for `dotnet test` to work with MTP.
+
+**C# style:** Use modern C# throughout — primary constructors, collection expressions (`[1, 2, 3]`), file-scoped namespaces, raw string literals, pattern matching, records, all latest language features.
 
 **Namespace layout within Cork.Language:**
 - `Cork.Language.Lexing` -- Token, TokenKind, Lexer, SourceLocation
@@ -194,7 +199,7 @@ What Phase 4 adds:
 - Struct initializer syntax: `Bullet { x = 100, y = 50, active = true }`
 - Struct-of-arrays memory layout for arrays
 - Field access via dot syntax
-- `this` reference in struct methods
+- No `this` — fields are directly in scope, parameter shadowing is a compile error
 - Struct arrays
 - All dispatch is static (no vtables, no indirection)
 - Composition (structs containing other structs)
@@ -232,7 +237,7 @@ public readonly record struct Token(
     TokenKind Kind,
     ReadOnlyMemory<char> Text,
     SourceLocation Location,
-    object? LiteralValue  // int, fixed-point value, string, bool, null
+    object? LiteralValue  // int, fixed-point value, string, bool
 );
 
 public readonly record struct SourceLocation(
@@ -244,7 +249,7 @@ public readonly record struct SourceLocation(
 );
 ```
 
-Note: The `object?` for `LiteralValue` boxes value types on the heap. For AOT, this is fine -- `object` boxing is fully supported. However, if profiling shows this is a hotspot, it can be replaced with a discriminated union struct later. In phase 1, keep it simple.
+Note: The `object?` for `LiteralValue` boxes value types on the heap. For AOT, this is fine -- `object` boxing is fully supported. However, if profiling shows this is a hotspot, it can be replaced with a discriminated union struct later. In phase 1, keep it simple. (The `?` here is C# nullable reference -- Cork the language has no null, but the compiler is written in C# which does.)
 
 **Token kinds (partial list of the key ones):**
 
@@ -259,15 +264,14 @@ ByteKw, SbyteKw, WordKw, SwordKw, BoolKw, FixedKw, StringKw, VarKw,
 // Hardware type keywords
 SpriteKw, CharsetKw, MusicKw, SoundKw, TilemapKw,
 // Declaration keywords
-ClassKw, AbstractKw, InterfaceKw, EnumKw, FlagsKw, SceneKw, EntryKw,
-PublicKw, PrivateKw, ProtectedKw, ConstKw, ImportKw, NewKw, CtorKw,
+StructKw, EnumKw, FlagsKw, SceneKw, EntryKw, ConstKw, ImportKw,
 // Control flow
 IfKw, ElseKw, WhileKw, ForKw, InKw, SwitchKw, CaseKw, DefaultKw,
 FallthroughKw, BreakKw, ReturnKw, GoKw,
 // Scene lifecycle
 HardwareKw, EnterKw, FrameKw, RelaxedKw, RasterKw, ExitKw,
 // Special
-ThisKw, ValueKw,
+ContinueKw, AsKw,
 
 // Punctuation
 Semicolon, Comma, Dot,
@@ -339,7 +343,7 @@ When the parser sees an identifier at statement position, it could be:
    - If `;` follows, this is an expression statement.
    - If the identifier could be a user-defined type name (uppercase by convention, or tracked in a symbol table from a prior pass), treat it as a type for a variable declaration.
 
-Actually, the cleaner approach: **two-pass name resolution**. In the first pass (or as the parser encounters class/enum declarations), register type names. Then when parsing statements, if an identifier is a known type name followed by another identifier, it is a declaration. This mirrors how C# compilers handle the same ambiguity.
+Actually, the cleaner approach: **two-pass name resolution**. In the first pass (or as the parser encounters struct/enum declarations), register type names. Then when parsing statements, if an identifier is a known type name followed by another identifier, it is a declaration. This mirrors how C# compilers handle the same ambiguity.
 
 However, for phase 1, a simpler heuristic works: type keywords (`byte`, `word`, `bool`, etc.) are always unambiguous. User-defined types start with uppercase (by strong convention). The parser can use `IsUpperCase(identifier)` as a heuristic for phase 1 and replace it with proper name resolution later.
 
@@ -353,15 +357,17 @@ receiver selector1: arg1 selector2: arg2 ;
 
 Each selector segment is `Identifier Colon [argument]`. The first segment's argument is optional (for no-arg calls). Subsequent segments always have arguments.
 
-An argument is parsed at unary-expression precedence (as specified in the grammar's `message_argument` production). This means `enemy takeDamage: weapon.power + bonus;` is ambiguous -- is `bonus` part of the expression or the start of a new selector? The grammar resolves this: message arguments are `unary_expression`, so the `+` is NOT consumed. The developer must write `enemy takeDamage: (weapon.power + bonus);` to include the addition. This is exactly how Objective-C works.
+Arguments are parsed as full expressions (all precedence levels). The parser terminates an argument when it sees `Identifier Colon` (the start of the next selector segment), `;` (end of statement), or `)` (end of parenthesized message send). This works because binary operators are symbols (`+`, `-`, `*`, etc.), never identifiers, so `Identifier Colon` unambiguously signals a new segment.
+
+This means `enemy takeDamage: health + bonus;` just works -- the `+` is part of the argument. Multi-segment calls like `enemy moveTo: x + 1 y: y + 1;` also work -- `y:` is recognized as a new segment because it's `Identifier Colon`.
+
+The only case requiring parens is when an argument itself contains a message send: `enemy foo: (other getX:) + 10;` -- without parens, `getX:` would look like a new segment of the outer message.
 
 **In expression context**, message sends are always wrapped in parentheses: `(enemy distanceFrom: player)`. The parser, upon seeing `(`, tentatively parses the inner content. If after parsing a postfix expression it sees `Identifier Colon`, it switches to message-send parsing. Otherwise, it is a plain parenthesized expression.
 
-**Challenge 3: `new` expressions.**
+**Challenge 3: Struct initializers.**
 
-`new Type:` (no-arg) vs `new Type selector: arg` (named constructor). After `new Identifier`, if the next token is `Colon` alone, it is a no-arg constructor. If it is `Identifier Colon`, it is the start of a named constructor's selector chain.
-
-Wait -- looking at the grammar more carefully: `new_arguments = ":" | message_first_segment { message_additional_segment }`. So `new Enemy:` has just `:` (no selector name). `new Enemy withHealth: 100 atX: 50` starts with `withHealth:` which is a `message_first_selector`. The parser checks: after `new Identifier`, if the next token is `Colon`, it is no-arg. If it is `Identifier Colon`, parse as a named constructor with selector chain.
+`Enemy { health = 10, x = 100 }` — when the parser sees an identifier followed by `{` in expression position, it could be a struct initializer. The parser checks: if the identifier is a known struct type (from the symbol registration pass or uppercase convention), parse it as a struct initializer. Inside the braces, each entry is `Identifier Equal Expression`, separated by commas.
 
 **Parser structure (key methods):**
 
@@ -369,9 +375,8 @@ Wait -- looking at the grammar more carefully: `new_arguments = ":" | message_fi
 ParseProgram() -> ProgramNode
 ParseTopLevelDeclaration() -> TopLevelNode
 ParseSceneDeclaration() -> SceneNode
-ParseClassDeclaration() -> ClassNode
+ParseStructDeclaration() -> StructNode
 ParseEnumDeclaration() -> EnumNode
-ParseInterfaceDeclaration() -> InterfaceNode
 ParseMethodDeclaration() -> MethodNode
 ParseBlock() -> BlockNode
 ParseStatement() -> StatementNode
@@ -390,7 +395,7 @@ ParsePostfix() -> ExprNode
 ParsePrimary() -> ExprNode
 ParseParenthesizedExprOrMessageSend() -> ExprNode
 ParseMessageSend(receiver) -> MessageSendExprNode
-ParseNewExpression() -> NewExprNode
+ParseStructInitializer() -> StructInitializerExprNode
 ```
 
 ---
@@ -478,6 +483,7 @@ FallthroughSwitchNode      -- subject, cases[], default?
 GoNode                     -- sceneName
 ReturnNode                 -- value: ExprNode?
 BreakNode
+ContinueNode
 ```
 
 **Expression nodes:**
@@ -487,14 +493,13 @@ IntLiteralExpr             -- value: long, inferredType (byte or word)
 FixedLiteralExpr           -- value: double (stored as 8.8 fixed internally)
 StringLiteralExpr          -- value: string
 BoolLiteralExpr            -- value: bool
-ThisExpr
 IdentifierExpr             -- name: string
 BinaryExpr                 -- left, op, right
 UnaryExpr                  -- op, operand
 MemberAccessExpr           -- receiver, memberName
 IndexExpr                  -- receiver, index
 MessageSendExpr            -- receiver, segments: (name, arg?)[]
-NewExpr                    -- typeName, segments: (name, arg?)[]  (empty for no-arg)
+StructInitializerExpr      -- typeName, fieldInits: (fieldName, value: ExprNode)[]
 ArrayInitializerExpr       -- elements: ExprNode[]
 ResourceImportExpr         -- path: string
 ```
@@ -506,7 +511,7 @@ public interface IAstVisitor<T>
 {
     T VisitProgram(ProgramNode node);
     T VisitScene(SceneDeclNode node);
-    T VisitClass(ClassDeclNode node);
+    T VisitStruct(StructDeclNode node);
     // ... one Visit method per node type
 }
 ```
@@ -529,13 +534,12 @@ Output: a populated `SymbolTable` with type entries, scene entries, and global v
 
 **Pass 2: Scope Resolution (`ScopeResolver`)**
 
-Walks the entire AST and builds a scope tree. Each scope (global, scene, class, method, block) has a parent pointer. Variables are registered in their enclosing scope when their declaration is visited.
+Walks the entire AST and builds a scope tree. Each scope (global, scene, struct, method, block) has a parent pointer. Variables are registered in their enclosing scope when their declaration is visited.
 
 When an `IdentifierExpr` is visited, the resolver walks up the scope chain to find the binding. If not found, it is an error. The resolver annotates each identifier node with a reference to its declaration (stored in a side table keyed by AST node identity, or as a mutable annotation field).
 
 This pass also resolves:
-- `this` references (must be inside a class method)
-- `value` references (must be inside a property setter)
+- Parameter-shadows-field detection (compile error if a parameter name matches a field name)
 - `go` targets (must name a valid scene)
 - Enum member access (`Direction.up`)
 - Hardware property access (`vic.border`, `joystick.port2.fire`)
@@ -549,7 +553,7 @@ Key type rules:
 - `fixed` arithmetic: `fixed + fixed -> fixed`, `fixed * byte -> fixed`, etc.
 - Comparisons always produce `bool`.
 - Message send return types are looked up from the method's declared return type.
-- `new` expressions have the type of the class being constructed.
+- Struct initializers have the type of the struct being initialized.
 - Array indexing: `byte[N]` indexed by `byte` or `word` produces `byte`.
 
 Type inference for `var`: the initializer's type becomes the variable's type.
@@ -560,7 +564,7 @@ Evaluates `const` declarations, enum member values, and array size expressions. 
 
 **Pass 5: Memory Size Calculation (`MemorySizeCalculator`)**
 
-Calculates the byte size of every type, every global variable, every scene's local data, every class instance, and every resource import. Sums these into:
+Calculates the byte size of every type, every global variable, every scene's local data, every struct instance, and every resource import. Sums these into:
 - `globalSize`: total bytes for global data + code
 - `sceneSize[sceneName]`: total bytes for each scene's local data + code
 
@@ -635,7 +639,7 @@ IrStoreHardwareReg(address, src)     -- e.g., writing $D020
 IrCall(dest?, selectorName, receiver?, args[])
 
 // Object access (all statically allocated, no heap)
-IrObjectSlotAddress(dest, arrayBase, index, classSize)
+IrObjectSlotAddress(dest, arrayBase, index, structSize)
 
 // Terminators
 IrBranch(condition, trueBlock, falseBlock)
@@ -785,12 +789,14 @@ Methods receive the struct's address (or array index for array elements) via a z
 
 **Static ownership (no reference counting):**
 
-Cork uses fully static ownership. No reference counting, no heap allocator, no runtime overhead for memory management. Every object lives in one of three places:
+Cork uses fully static ownership with value-type structs. No reference counting, no heap allocator, no runtime overhead for memory management. Every variable lives in one of three places:
 - **Global scope** — lifetime is the entire program
 - **Scene scope** — lifetime is while the scene is active
-- **Array slot** — lifetime is the lifetime of the owning array
+- **Local scope** — lifetime is the enclosing block
 
-References to objects are borrows. The compiler's ownership analyzer (a semantic analysis pass) proves at compile time that no reference outlives its owner. If it can't prove this, it emits a compile error. This eliminates all runtime memory management overhead — no refcount increments, no decrements, no free lists, no heap fragmentation.
+All structs are value types with in-place semantics. Method calls, field writes, and for-each loops operate on the original struct — not a copy. Copying only happens on explicit variable assignment (`var copy = original;`). Arrays of structs own their elements inline. There are no pointers, no references, no shared mutable state, and no need for any ownership analysis. This eliminates all runtime memory management overhead entirely.
+
+On the 6510, this is natural: the compiler always passes addresses (zero-page pointers or array indices) to struct methods. A for-each loop compiles to an indexed loop over the struct-of-arrays layout.
 
 ---
 
@@ -827,7 +833,7 @@ The planner works in this order:
 
 2. **Assign global data**: global variables, const arrays, resource imports (music files, charset binaries). These are always resident.
 
-3. **Assign the runtime library**: refcount helpers, multiply/divide routines, IRQ dispatcher. These are always resident. Placed at a fixed known location (e.g., $C000 or end of program area).
+3. **Assign the runtime library**: multiply/divide routines, IRQ dispatcher, scene loader. These are always resident. Placed at a fixed known location (e.g., $C000 or end of program area).
 
 4. **Assign per-scene data**: for each scene, calculate its local variables, local resources, and local code. These go into a "scene slot" -- a region that is reused across scenes. The scene slot starts after global data. On scene transition, the new scene's data is either:
    - Already in RAM (if the program is single-scene or all scenes fit simultaneously)
@@ -857,7 +863,7 @@ The cycle estimator calculates the worst-case CPU cycle cost of a `frame` block.
 2. For each 6510 instruction, look up its cycle cost from a table (the table in Section 2.2 of the timing research).
 3. For branches: take the worse of the two paths (branch taken vs not taken). For loops: multiply the body cost by the maximum iteration count (which must be determinable at compile time, or use a conservative estimate).
 4. For subroutine calls (`JSR`): recursively estimate the called function's cost.
-5. For virtual dispatch calls: use the worst-case across all possible targets.
+5. All calls are static dispatch, so the callee's cost is always known.
 
 **Budget calculation:**
 
@@ -1019,9 +1025,11 @@ irq_handler:
 
 ### 13. Testing Strategy
 
+All tests use **TUnit** with **TUnit.Mocks** on the **MTP (Microsoft Testing Platform)**. A `global.json` at the solution root is required for `dotnet test` to work with MTP.
+
 **Unit tests (Cork.Language.Tests):**
 
-- **Lexer tests**: Feed source strings, assert token sequences. Cover every token type, edge cases (hex literals, fixed-point literals, underscores in numbers, string escapes, comment stripping, `?.` vs `?` + `.`).
+- **Lexer tests**: Feed source strings, assert token sequences. Cover every token type, edge cases (hex literals, fixed-point literals, underscores in numbers, string escapes, comment stripping).
 - **Parser tests**: Feed token sequences (or source strings through the lexer), assert AST structure. One test per grammar production. Test error recovery for malformed input.
 - **Semantic analysis tests**: Feed ASTs, assert that type checking passes or produces specific errors. Test scope resolution (variable not found, duplicate declaration). Test const evaluation. Test struct size calculation and composition validation.
 

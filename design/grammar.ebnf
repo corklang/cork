@@ -79,6 +79,7 @@ qualified_name = identifier { "." identifier } ;
 type = primitive_type
      | hardware_type
      | user_type
+     | sized_string_type
      | array_type ;
 
 primitive_type = "byte" | "sbyte" | "word" | "sword"
@@ -91,9 +92,14 @@ hardware_type = "sprite" | "charset" | "music" | "sound" | "tilemap" ;
 (* User-defined type names (structs, enums).                             *)
 user_type = identifier ;
 
+(* Fixed-size strings: string[N] is N bytes of PETSCII data inline.      *)
+(* Plain "string" infers its size from the initializer literal.          *)
+sized_string_type = "string" "[" const_expression "]" ;
+
 (* Fixed-size arrays: size is a compile-time constant expression.        *)
 (* Written as Type[Size], e.g., byte[20] or Enemy[8].                   *)
 (* The base can be any non-array type — no arrays of arrays.             *)
+(* Note: string[N] is a sized string, NOT an array of strings.           *)
 array_type = ( primitive_type | hardware_type | user_type )
              "[" const_expression "]" ;
 
@@ -202,6 +208,7 @@ struct_method = method_declaration ;
 (*                                                                       *)
 (* The full method identity is the concatenation of its selector         *)
 (* segments: e.g., "distanceFromX:toY:"                                  *)
+(* No method overloading — the selector is unique within a struct/scene. *)
 
 method_declaration = [ type ] method_signature block ;
 
@@ -343,15 +350,15 @@ assignment_statement = lvalue assignment_operator expression ";" ;
 (* Supports chained field access (dots) and array indexing, in any       *)
 (* combination:                                                          *)
 (*   x                      — simple variable                            *)
-(*   this.x                 — field via explicit self                     *)
 (*   enemy.health           — field access                               *)
 (*   enemies[i]             — array element                              *)
 (*   enemies[i].health      — array element field                        *)
 (*   enemy.pos.x            — nested field access                        *)
 (*   vic.border             — hardware register                          *)
+(* Note: no "this" keyword — fields are directly in scope in methods.    *)
 lvalue = lvalue_root { lvalue_suffix } ;
 
-lvalue_root = identifier | "this" ;
+lvalue_root = identifier ;
 
 lvalue_suffix = "." identifier
               | "[" expression "]" ;
@@ -401,6 +408,9 @@ assignment_expression = lvalue assignment_operator expression ;
 
 (* For-each iteration over a collection (typically an array).            *)
 (* The loop variable is implicitly declared with the element type.       *)
+(* IMPORTANT: for-each has in-place semantics — the loop variable is     *)
+(* NOT a copy. Modifications (field writes, method calls) affect the     *)
+(* original array element. Copying only occurs on explicit "var x = y;"  *)
 for_each_statement = "for" "(" identifier "in" expression ")" block ;
 
 (* Switch — no fallthrough by default. Each case is independent.         *)
@@ -488,7 +498,15 @@ multiplicative_expression = unary_expression
 (* --- Unary Operators --- *)
 
 unary_expression = ( "-" | "!" | "~" ) unary_expression
-                 | postfix_expression ;
+                 | cast_expression ;
+
+(* --- Cast Expressions --- *)
+
+(* "as" performs explicit type conversion. Sits between unary and postfix *)
+(* so that "x + y as byte" parses as "x + (y as byte)", not "(x + y) as byte". *)
+(* Use parens for the latter: "(x + y) as byte".                         *)
+
+cast_expression = postfix_expression [ "as" type ] ;
 
 (* --- Postfix Expressions (highest precedence before primary) --- *)
 
@@ -506,7 +524,6 @@ primary_expression = integer_literal
                    | fixed_literal
                    | string_literal
                    | boolean_literal
-                   | "this"                     (* self-reference in methods *)
                    | identifier
                    | struct_initializer
                    | array_initializer
@@ -587,16 +604,28 @@ message_first_selector = selector_with_colon [ message_argument ] ;
 (* Additional selectors always have an argument.                         *)
 message_additional_selector = selector_with_colon message_argument ;
 
-(* A message argument is a unary expression. Simple arguments (literals, *)
-(* identifiers, field accesses) can appear bare. Complex expressions     *)
-(* must be wrapped in parens (which is a parenthesized_expression or     *)
-(* parenthesized_message_send — both are primary, thus unary).           *)
+(* A message argument is a full expression (all precedence levels).       *)
+(* The parser terminates the argument when it encounters:                 *)
+(*   - identifier followed by colon (= next selector segment)            *)
+(*   - semicolon (= end of statement)                                    *)
+(*   - closing paren (= end of parenthesized message send)               *)
+(*                                                                       *)
+(* This works because binary operators are symbols (+, -, *, etc.),      *)
+(* never identifiers. So "identifier colon" unambiguously signals        *)
+(* a new selector segment, not part of the argument expression.          *)
+(*                                                                       *)
+(* The only case requiring parens is when an argument itself contains    *)
+(* a message send, since its "identifier colon" would look like a        *)
+(* new segment:                                                          *)
+(*   enemy foo: (other getX:) + offset;   — parens needed               *)
 (*                                                                       *)
 (* Examples:                                                             *)
 (*   enemy moveTo: 100 y: 50;               — literal args              *)
-(*   enemy moveTo: player.x y: pos;         — identifier/field args     *)
-(*   enemy takeDamage: (w.power + bonus);   — complex expr in parens    *)
-message_argument = unary_expression ;
+(*   enemy takeDamage: health + bonus;      — arithmetic, no parens!     *)
+(*   enemy moveTo: x + 1 y: y + 1;         — "y:" starts next segment   *)
+(*   enemy foo: a * b + c bar: d > 5;      — full expressions each      *)
+(*   enemy foo: (other getX:) + 10;        — nested message needs parens *)
+message_argument = expression ;
 
 
 (* ===================================================================== *)
@@ -703,12 +732,12 @@ const_expression = expression ;
 (* Scene lifecycle keywords:                                             *)
 (*   hardware  enter  frame  relaxed  raster  exit                       *)
 (*                                                                       *)
-(* Special identifiers (contextual):                                     *)
-(*   this                                                                *)
+(* Other keywords:                                                       *)
+(*   as                                                                  *)
 (*                                                                       *)
 (* REMOVED from previous version (no longer keywords):                   *)
 (*   class  abstract  interface  public  private  protected              *)
-(*   func  new  ctor  null  get  set  value                              *)
+(*   func  new  ctor  null  get  set  value  this                        *)
 
 
 (* ===================================================================== *)

@@ -2,7 +2,7 @@
 
 ## Vision
 
-Cork is a high-level, expressive programming language that compiles to Commodore 64 machine code. It pairs a modern developer experience — structs with methods, type inference, null safety, fully static memory management — with a built-in SDK that makes C64 hardware feel native to the language. The compiler, written in C# (.NET 10, AOT compatible), handles all the brutal realities of the 6510 CPU and 64KB address space so the developer can focus on their vision.
+Cork is a high-level, expressive programming language that compiles to Commodore 64 machine code. It pairs a modern developer experience — structs with methods, type inference, fully static memory management — with a built-in SDK that makes C64 hardware feel native to the language. The compiler, written in C# (.NET 10, AOT compatible), handles all the brutal realities of the 6510 CPU and 64KB address space so the developer can focus on their vision.
 
 **Primary audience:** Game developers who want productivity and expression.  
 **Secondary audience:** General application developers targeting the C64.
@@ -12,7 +12,7 @@ Cork is a high-level, expressive programming language that compiles to Commodore
 ## Core Principles
 
 1. **Expression over ceremony** — The language should read clearly and feel good to write.
-2. **Compile-time everything** — Every safety feature (null checks, type checks, memory validation) is resolved at compile time. Zero runtime overhead for safety.
+2. **Compile-time everything** — Every safety feature (type checks, memory validation, shadowing prevention) is resolved at compile time. Zero runtime overhead for safety.
 3. **Fully static memory** — No heap, no garbage collection, no reference counting. Every variable's size and location is known at compile time. The compiler owns the 64KB layout.
 4. **The hardware is the SDK** — C64 hardware (VIC-II, SID, CIA, sprites, raster interrupts) surfaces as declarative, first-class language constructs — not a bolted-on library.
 5. **Scenes as architecture** — Programs are organized into scenes that the compiler packs, validates, and loads automatically. If it doesn't fit in memory, it's a compiler error — not a runtime crash.
@@ -45,7 +45,7 @@ Enemy[8] enemies;                 // 8 enemies, all at defaults
 
 // Message-passing calls — colons signal invocation
 player moveTo: 100 y: 50;
-enemy takeDamage: (weapon.power + bonus);
+enemy takeDamage: weapon.power + bonus;
 
 // No-arg calls — trailing colon
 player update:;
@@ -70,7 +70,7 @@ enemy.x = 100;
 | `sword`  | 16-bit | Signed -32768 to 32767             |
 | `bool`   | 8-bit  | true/false                         |
 | `fixed`  | 16-bit | 8.8 fixed-point for sub-pixel math |
-| `string` | varies | PETSCII string (v1: basic support) |
+| `string` | fixed  | Fixed-size PETSCII string (size set at declaration) |
 
 ### Built-in Hardware Types
 
@@ -103,6 +103,17 @@ var pos = 1000;                // word
 const byte MAX_LIVES = 3;
 const MAX_ENEMIES = 8;         // inferred
 ```
+
+### Strings
+
+Strings are fixed-size. The size is determined at declaration — either from an explicit size or inferred from the initial value.
+
+```cork
+string name = "HELLO";         // fixed at 5 bytes, inferred from literal
+string[20] buffer = "HI";      // fixed at 20 bytes, padded with spaces
+```
+
+Strings store PETSCII data inline (not as a pointer). A `string[20]` is exactly 20 bytes in memory. Strings cannot grow or shrink at runtime.
 
 ### No Null
 
@@ -158,6 +169,33 @@ flags enum SpriteFlags : byte {
 }
 ```
 
+### Type Casting
+
+Use `as` for explicit type conversion. Widening conversions (no data loss) are implicit. Narrowing conversions (potential data loss) require `as`.
+
+```cork
+// Implicit widening — always safe, no syntax needed
+byte b = 5;
+word w = b;              // byte -> word: OK
+fixed f = b;             // byte -> fixed (5.0): OK
+
+// Explicit narrowing — requires "as"
+word big = 1000;
+byte small = big as byte;    // truncates to low byte
+fixed speed = 2.75;
+byte whole = speed as byte;  // truncates fractional part (2)
+
+// Signed/unsigned conversions require "as"
+byte b = 200;
+sbyte s = b as sbyte;        // reinterprets bits (-56)
+```
+
+The compiler warns when a narrowing `as` would lose data in a constant expression:
+
+```
+warning CORK020: Narrowing conversion of 1000 to byte truncates to 232.
+```
+
 ### Numeric Literals
 
 ```cork
@@ -190,15 +228,20 @@ The colon means "I'm sending a message." The dot means "I'm accessing data." The
 ```cork
 // With arguments — colons delimit each argument
 enemy moveTo: 100 y: 50;
-enemy takeDamage: (weapon.power + bonus);
+enemy takeDamage: weapon.power + bonus;
 Music play: bgTheme;
 
 // Spacing around colons is flexible
 enemy moveTo:100 y:50;
 enemy moveTo: 100 y: 50;
 
-// Complex expressions use parens
-enemy takeDamage: (weapon.power + bonus);
+// Full expressions work as arguments — no parens needed for math
+enemy takeDamage: health + bonus;
+enemy moveTo: x + 1 y: y + 1;
+enemy foo: a * b + c bar: d > 5;
+
+// Parens only needed when an argument contains a message send
+enemy foo: (other getX:) + offset;
 
 // No-arg calls — trailing colon
 enemy update:;
@@ -222,9 +265,9 @@ update: {
 }
 
 // Void, with args
-moveTo: (byte x) y: (byte y) {
-    this.x = x;
-    this.y = y;
+moveTo: (byte newX) y: (byte newY) {
+    x = newX;
+    y = newY;
 }
 
 // With return type
@@ -233,6 +276,31 @@ byte distanceFromX: (byte x) toY: (byte y) {
 }
 
 // The full method identity is its segment names: "distanceFromX:toY:"
+```
+
+### No Method Overloading
+
+The selector (segment names with colons) is the method's unique identity. You cannot have two methods with the same selector but different parameter types. This matches Objective-C and Smalltalk semantics.
+
+```cork
+// OK — different selectors
+takeDamage: (byte amount) { ... }
+takeHeavyDamage: (word amount) { ... }
+
+// COMPILE ERROR — duplicate selector "takeDamage:"
+takeDamage: (byte amount) { ... }
+takeDamage: (word amount) { ... }
+```
+
+### Return in Lifecycle Blocks
+
+`return` inside `enter`, `frame`, `relaxed frame`, `exit`, or `raster` blocks means early exit from that block. No value may be returned.
+
+```cork
+frame {
+    if (!gameStarted) { return; }
+    // rest of frame logic...
+}
 ```
 
 ---
@@ -291,7 +359,7 @@ The compiler is smart: only non-default values emit code. If `health` defaults t
 
 ### Methods
 
-Methods on structs receive an implicit `this` reference. They are always statically dispatched (no vtables, no indirection).
+Methods on structs can access the struct's fields directly — no `this` keyword needed. Field names are always in scope. Parameter names must not shadow field names (the compiler enforces this). All dispatch is static (no vtables, no indirection).
 
 ```cork
 struct Player {
@@ -309,7 +377,7 @@ struct Player {
 
 // Usage
 Player player;
-player handleInput:;        // calls handleInput with implicit this = &player
+player handleInput:;        // fields accessed directly inside the method
 player.x;                   // direct field access, no method call
 ```
 
@@ -374,7 +442,31 @@ Objects live in one of three places:
 | **Scene** | While scene is active | Scene-local variables and resources |
 | **Local** | Current scope/block | Function-local variables |
 
-All struct instances are value types. Assigning a struct copies it. Arrays of structs own their elements. There is no indirection, no pointers, no shared mutable state.
+All struct instances are value types with in-place semantics. Arrays of structs own their elements. There is no indirection, no pointers, no shared mutable state.
+
+### In-Place Semantics
+
+The compiler always operates on structs in place. Method calls, field writes, and for-each loops modify the original — not a copy. Copying only happens on explicit variable assignment.
+
+```cork
+// In-place — modifies the array element directly
+enemies[3] update:;
+enemies[3].health = 10;
+
+// In-place — each iteration modifies the actual array element
+for (enemy in enemies) {
+    enemy update:;              // modifies enemies[0], enemies[1], etc.
+}
+
+// In-place — nested struct modified in place
+enemy.pos moveTo: 100 y: 50;   // modifies enemy.pos, not a copy
+
+// COPY — explicit variable assignment creates an independent copy
+var snapshot = enemies[3];      // snapshot is a copy
+snapshot.health = 0;            // does not affect enemies[3]
+```
+
+On the 6510, this is natural — the compiler passes addresses internally. No copying overhead unless you ask for it.
 
 ### No Manual Memory
 
@@ -818,6 +910,9 @@ Cork uses keyword modifiers for variant behavior. This is a consistent pattern t
 | Dot-enum shorthand   | Always use `Type.value` for clarity             |
 | Access modifiers     | Everything is public                            |
 | Constructors         | Field defaults + initializer syntax             |
+| `this` keyword       | Fields are in scope directly; no shadowing allowed |
+| Method overloading   | Selector is the unique identity; use different names |
+| Dynamic strings      | Strings are fixed-size, determined at declaration   |
 
 ---
 
@@ -830,4 +925,3 @@ Cork uses keyword modifiers for variant behavior. This is a consistent pattern t
 5. **Advanced graphics modes** — How do bitmap mode, FLI, sprite multiplexing surface in the language?
 6. **Optimization hints** — Can the developer annotate hot paths or suggest memory placement?
 7. **Library system** — How are libraries authored, versioned, and distributed?
-8. **Type casting** — Implicit widening (byte -> word)? Explicit narrowing? Syntax?
