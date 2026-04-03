@@ -365,9 +365,8 @@ relaxed_frame_block = "relaxed" "frame" block ;
 
 (* Raster interrupt at a specific scanline. The compiler wires the IRQ.  *)
 (* Multiple raster blocks are allowed per scene.                         *)
-(* Syntax: raster(line: N) { ... }                                       *)
-(* The "line:" inside the parens is a fixed keyword, not a message send. *)
-raster_block = "raster" "(" "line" ":" expression ")" block ;
+(* Syntax: raster N { ... }                                              *)
+raster_block = "raster" expression block ;
 
 exit_block = "exit" block ;
 
@@ -896,7 +895,7 @@ const_expression = expression ;
 (*           }                                                           *)
 (*       }                                                               *)
 (*                                                                       *)
-(*       raster(line: 200) {                                             *)
+(*       raster 200 {                                                    *)
 (*           vic.border = Color.black;                                   *)
 (*       }                                                               *)
 (*   }                                                                   *)

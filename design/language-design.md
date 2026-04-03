@@ -339,15 +339,26 @@ class Paddle {
 
 ## Memory Management
 
-### Reference Counting
+### Static Ownership
 
-Cork uses compiler-managed reference counting for heap-allocated objects. The compiler performs static lifetime analysis and elides refcount operations wherever ownership can be proven at compile time.
+Cork uses fully static ownership — no reference counting, no heap allocator, no garbage collection. Every object's lifetime is known at compile time. Zero runtime overhead.
+
+Objects live in one of three places:
+
+| Owner | Lifetime | Example |
+|-------|----------|---------|
+| **Global** | Entire program | `word highScore = 0;` |
+| **Scene** | While scene is active | Scene-local variables and resources |
+| **Array slot** | Lifetime of the array | `Enemy[8] enemies;` owns its 8 enemies |
+
+References to objects are **borrows** — the compiler proves at compile time that no reference outlives its owner. If it can't prove this, it's a compile error.
 
 ```cork
-var enemy = new Enemy:;       // refcount = 1
-var target = enemy;           // compiler may or may not bump refcount
-                              // depending on static analysis
-// when last reference goes out of scope, object is freed
+Enemy[8] enemies;
+var target = enemies[3];      // borrow — compiler proves target
+                              // doesn't outlive the array
+target takeDamage: 1;         // OK: array is still alive
+// target goes out of scope — nothing to free
 ```
 
 ### No Manual Memory
@@ -369,7 +380,7 @@ Every scene has built-in lifecycle phases. These are **keywords**, not methods.
 | `enter`          | Runs once when the scene becomes active             |
 | `frame`          | Runs every frame — compiler **errors** if estimated cycle budget overruns |
 | `relaxed frame`  | Runs every frame — compiler **warns** but allows potential overruns |
-| `raster(line: N)`| Runs at a specific rasterline (compiler wires IRQ)  |
+| `raster N`| Runs at a specific rasterline (compiler wires IRQ)  |
 | `exit`           | Runs once before leaving the scene                  |
 
 #### Frame Budget Validation
@@ -434,7 +445,7 @@ entry scene TitleScreen {
         }
     }
 
-    raster(line: 200) {
+    raster 200 {
         border: Color.red;
     }
 
@@ -577,12 +588,12 @@ Declared as part of the scene. The compiler handles all the IRQ setup, chaining,
 
 ```cork
 scene GameLevel {
-    raster(line: 0) {
+    raster 0 {
         vic.border = Color.blue;
         vic.background = Color.blue;
     }
 
-    raster(line: 200) {
+    raster 200 {
         vic.border = Color.black;
         vic.background = Color.black;
     }
@@ -775,7 +786,9 @@ Cork uses keyword modifiers for variant behavior. This is a consistent pattern t
 | Dynamic arrays       | Fixed-size only; 64KB demands predictability    |
 | Exceptions           | Runtime overhead; errors are compile-time       |
 | Manual memory mgmt   | Compiler owns the memory map                   |
-| Garbage collection   | Reference counting is deterministic and lighter |
+| Garbage collection   | Static ownership — all lifetimes compile-time   |
+| Reference counting   | Static ownership eliminates the need entirely   |
+| Heap allocation      | All objects are static, scene-scoped, or array-owned |
 | `func` keyword       | Method signatures are self-evident              |
 | Dot-enum shorthand   | Always use `Type.value` for clarity             |
 
