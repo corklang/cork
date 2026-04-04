@@ -11,10 +11,13 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 {
     public (byte[] Code, ushort EntryPoint) Generate(ProgramNode program)
     {
+        // Dead code elimination: determine which globals are reachable from scenes
+        var reachable = ReachabilityAnalysis.Analyze(program);
+
         // Collect inline sprite patterns (separate from const data — aligned later)
         var inlineSprites = CollectInlineSpritePatterns(program);
 
-        // Collect const data
+        // Collect const data (only reachable arrays)
         var dataBytes = new List<byte>();
         var dataNames = new Dictionary<string, int>();
         var constArraySizes = new Dictionary<string, int>();
@@ -24,7 +27,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
         foreach (var decl in program.Declarations)
         {
-            if (decl is ConstArrayDeclNode constArr)
+            if (decl is ConstArrayDeclNode constArr && reachable.ConstArrays.Contains(constArr.Name))
             {
                 dataNames[constArr.Name] = dataBytes.Count;
                 constArraySizes[constArr.Name] = constArr.Size;
@@ -43,14 +46,16 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         var entryScene = scenes.FirstOrDefault(s => s.IsEntry)
             ?? throw new InvalidOperationException("No entry scene found");
 
-        // Collect global variables
-        var globalVars = program.Declarations.OfType<GlobalVarDeclNode>().ToList();
+        // Collect global variables (only reachable ones)
+        var globalVars = program.Declarations.OfType<GlobalVarDeclNode>()
+            .Where(gv => reachable.GlobalVars.Contains(gv.Name))
+            .ToList();
 
         var constDataSize = dataBytes.Count;
 
         // First pass: measure code size (sprite pointers registered as placeholder 0)
         var measuredSize = EmitAll(program, scenes, globalVars, dataNames, constArraySizes,
-            inlineSprites, codeBase, 0xFFFF).Length;
+            inlineSprites, reachable.Methods, codeBase, 0xFFFF).Length;
 
         // Second pass setup: compute data addresses
         var dataStart = (ushort)(codeBase + measuredSize);
@@ -60,8 +65,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
         // Measure inline string data size (deterministic, same between passes)
         var measureCtx = CreateContext(codeBase, dataAddresses);
-        RegisterAllTypes(measureCtx, program, globalVars, constArraySizes, inlineSprites);
-        EmitCode(measureCtx, program, scenes, globalVars, entryScene);
+        RegisterAllTypes(measureCtx, program, globalVars, constArraySizes, inlineSprites, reachable.Methods);
+        EmitCode(measureCtx, program, scenes, globalVars, entryScene, reachable.Methods);
         var measureInlineData = measureCtx.FinalizeInlineData(
             (ushort)(codeBase + measureCtx.Buffer.Length + constDataSize));
 
@@ -71,13 +76,13 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
         // Final pass: emit with real sprite pointer values
         var ctx = CreateContext(codeBase, dataAddresses);
-        RegisterAllTypes(ctx, program, globalVars, constArraySizes, inlineSprites);
+        RegisterAllTypes(ctx, program, globalVars, constArraySizes, inlineSprites, reachable.Methods);
         foreach (var (dataName, _, _, _) in inlineSprites)
         {
             var ptrName = dataName.Replace("Data", "Ptr");
             ctx.Symbols.AddConstantNoShadowCheck(ptrName, spritePointers[dataName]);
         }
-        EmitCode(ctx, program, scenes, globalVars, entryScene);
+        EmitCode(ctx, program, scenes, globalVars, entryScene, reachable.Methods);
 
         // Finalize inline data (string literals)
         var codeSize = ctx.Buffer.Length;
@@ -109,7 +114,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
     private static void RegisterAllTypes(EmitContext ctx, ProgramNode program,
         List<GlobalVarDeclNode> globalVars, Dictionary<string, int> constArraySizes,
-        List<(string DataName, string SceneName, string SpriteName, byte[] Bytes)> inlineSprites)
+        List<(string DataName, string SceneName, string SpriteName, byte[] Bytes)> inlineSprites,
+        HashSet<string>? reachableMethods = null)
     {
         foreach (var decl in program.Declarations)
             if (decl is StructDeclNode sd)
@@ -122,7 +128,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         foreach (var gv in globalVars)
             ctx.Symbols.AllocGlobal(gv.Name);
         foreach (var decl in program.Declarations)
-            if (decl is GlobalMethodNode gm)
+            if (decl is GlobalMethodNode gm &&
+                (reachableMethods == null || reachableMethods.Contains(gm.SelectorName)))
                 RegisterGlobalMethod(ctx, gm);
         foreach (var gv in globalVars)
             if (gv.Initializer is IntLiteralExpr constInit)
@@ -138,7 +145,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
     }
 
     private static void EmitCode(EmitContext ctx, ProgramNode program,
-        List<SceneNode> scenes, List<GlobalVarDeclNode> globalVars, SceneNode entryScene)
+        List<SceneNode> scenes, List<GlobalVarDeclNode> globalVars, SceneNode entryScene,
+        HashSet<string>? reachableMethods = null)
     {
         ctx.Buffer.EmitSei();
         foreach (var gv in globalVars)
@@ -151,7 +159,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
         ctx.Symbols.ResetToGlobalScope();
         foreach (var decl in program.Declarations)
-            if (decl is GlobalMethodNode gm)
+            if (decl is GlobalMethodNode gm &&
+                (reachableMethods == null || reachableMethods.Contains(gm.SelectorName)))
                 EmitGlobalMethod(ctx, gm);
 
         ctx.RuntimeLib.EmitRuntimeLibrary();
@@ -161,6 +170,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         List<GlobalVarDeclNode> globalVars, Dictionary<string, int> dataNames,
         Dictionary<string, int> constArraySizes,
         List<(string DataName, string SceneName, string SpriteName, byte[] Bytes)> inlineSprites,
+        HashSet<string> reachableMethods,
         ushort codeBase, ushort dataStart)
     {
         var dataAddresses = new Dictionary<string, ushort>();
@@ -168,10 +178,10 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
             dataAddresses[name] = (ushort)(dataStart + offset);
 
         var ctx = CreateContext(codeBase, dataAddresses);
-        RegisterAllTypes(ctx, program, globalVars, constArraySizes, inlineSprites);
+        RegisterAllTypes(ctx, program, globalVars, constArraySizes, inlineSprites, reachableMethods);
 
         var entryScene = scenes.First(s => s.IsEntry);
-        EmitCode(ctx, program, scenes, globalVars, entryScene);
+        EmitCode(ctx, program, scenes, globalVars, entryScene, reachableMethods);
         return ctx.Buffer.ToArray();
     }
 
