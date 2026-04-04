@@ -281,13 +281,21 @@ scene_variable_declaration = variable_declaration ;
 
 (* --- Sprite Declarations --- *)
 
-(* Sprites are declared with the "sprite" keyword followed by a name     *)
-(* and a block of property settings. Declarative construct for C64       *)
-(* hardware sprites.                                                     *)
+(* Sprites are declared with the "sprite" keyword, an optional hardware  *)
+(* slot number (0-7), a name, and a block of property settings.          *)
+(* The data: setting accepts an identifier (const byte[63] reference),   *)
+(* a backtick-delimited inline pattern, or a future import expression.   *)
 
-scene_sprite_declaration = "sprite" identifier "{" { sprite_setting } "}" ;
+scene_sprite_declaration = "sprite" [ integer_literal ] identifier
+                           "{" { sprite_setting } "}" ;
 
 sprite_setting = identifier ":" expression ";" ;
+
+(* Sprite pattern literals — backtick-delimited pixel art.               *)
+(* Whitespace is ignored. Hi-res: 504 chars (24x21) using "." and "#".   *)
+(* Multicolor: 252 chars (12x21) using ".", "1", "2", "3".              *)
+
+sprite_pattern_literal = "`" { any_character_except_backtick } "`" ;
 
 (* --- Lifecycle Blocks --- *)
 
@@ -530,6 +538,7 @@ primary_expression = integer_literal
                    | fixed_literal
                    | string_literal
                    | boolean_literal
+                   | sprite_pattern_literal
                    | identifier
                    | struct_initializer
                    | array_initializer

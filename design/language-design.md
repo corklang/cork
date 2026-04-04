@@ -644,45 +644,105 @@ C64 hardware is exposed through declarative syntax and built-in types. No import
 ### VIC-II (Graphics)
 
 ```cork
-// Declarative in scene hardware block
 hardware {
+    mode: text;               // text | multicolorText | bitmap | multicolorBitmap | ecm
     border: Color.lightBlue;
     background: Color.blue;
-    mode: multicolorText;
+    background1: Color.red;   // ECM and multicolor text: $D022
+    background2: Color.green; // ECM and multicolor text: $D023
+    background3: Color.yellow; // ECM only: $D024
+    multicolor0: Color.white; // Shared sprite multicolor: $D025
+    multicolor1: Color.red;   // Shared sprite multicolor: $D026
 }
-
-// Imperative in code
-vic.border = Color.red;
-vic.background = Color.black;
 ```
+
+The `mode:` setting writes $D011, $D016, and $D018 to configure the VIC-II. Every mode explicitly sets all three registers so scene transitions between modes are clean.
+
+| Mode | Resolution | Colors | Notes |
+|------|-----------|--------|-------|
+| `text` | 40×25 chars | 1 per char | Default. $D018=$15 |
+| `multicolorText` | 40×25 chars | 4 per char | Half horizontal res. Color RAM bit 3 enables per-char |
+| `bitmap` | 320×200 px | 2 per 8×8 cell | Bitmap at $2000. $D018=$1D |
+| `multicolorBitmap` | 160×200 px | 4 per 4×8 cell | Bitmap at $2000. Background via $D021 |
+| `ecm` | 40×25 chars | 4 backgrounds | Char bits 6-7 select background. Only 64 chars |
 
 ### Sprites
 
+Sprites are declared inside scenes with an explicit hardware slot number (0-7):
+
 ```cork
-// Declarative
-sprite player {
-    data: import("player.spr");
-    x: 160;
-    y: 150;
+sprite 0 player {
+    data: `
+        . . . . . . . . # # # # # # . . . . . . . . . .
+        . . . . . . # # # # # # # # # # . . . . . . . .
+        . . . . # # # # # # # # # # # # # # . . . . . .
+        ...21 rows of 24 pixels...
+    `;
+    x: 172;
+    y: 200;
     color: Color.green;
-    multicolor: true;
-    multicolor1: Color.white;
-    multicolor2: Color.black;
-    expandX: false;
-    expandY: false;
-    priority: SpritePriority.front;
-}
-
-// Imperative
-player.x += 2;
-player.visible = true;
-player.frame = walkAnimation[frameIndex];
-
-// Collision
-if (player collidesWith: enemy) {
-    // ...
 }
 ```
+
+**Inline sprite patterns** use backtick-delimited pixel art. Whitespace is ignored — add any spacing for readability. Hi-res sprites use `.` (transparent) and `#` (sprite color), 24×21 pixels. Multicolor sprites use `.`/`1`/`2`/`3` for the four color values, 12×21 fat pixels.
+
+The compiler validates dimensions, converts to 63 bytes, and places the data 64-byte aligned in the output so VIC-II reads it directly — no runtime copy.
+
+The `data:` setting accepts three forms:
+- Backtick pattern: `data: \`...pixels...\`;` — inline pixel art
+- Identifier: `data: spriteName;` — reference to a `const byte[63]` array
+- Future: `data: import("file.bin");` — binary file import
+
+**Sprite settings:**
+
+| Setting | Type | VIC-II Register | Notes |
+|---------|------|----------------|-------|
+| `x:` | byte | $D000+n*2 | Initial X position |
+| `y:` | byte | $D001+n*2 | Initial Y position |
+| `color:` | byte | $D027+n | Sprite color |
+| `multicolor:` | bool | $D01C bit n | Enable multicolor mode |
+| `expandX:` | bool | $D01D bit n | Double width |
+| `expandY:` | bool | $D017 bit n | Double height |
+| `priority:` | `back` | $D01B bit n | Behind background |
+| `data:` | pattern/ident | $07F8+n | Sprite data pointer |
+
+Shared multicolor registers (`multicolor0:`/`multicolor1:` → $D025/$D026) go in the `hardware` block, not in sprite declarations, since they're global to all sprites.
+
+**Auto-sync:** Writing to sprite fields automatically updates the corresponding VIC-II register. No manual poke needed:
+
+```cork
+player.x += 2;   // updates ZP field AND writes $D000
+player.y -= 1;   // updates ZP field AND writes $D001
+```
+
+**Collision detection:**
+
+```cork
+if ((player collidedWith: enemy)) {
+    poke: 0xD020 value: Color.red;
+}
+```
+
+Reads the sprite-sprite collision register ($D01E) and checks both sprite bits. Parentheses required around the message send in condition position.
+
+**Multicolor sprite example** (12×21, 2 bits per pixel):
+
+```cork
+sprite 1 alien {
+    data: `
+        .   .   .   .   2   2   2   2   .   .   .   .
+        .   .   2   2   1   3   1   3   2   2   .   .
+        .   2   2   2   2   2   2   2   2   2   2   .
+        2   2   2   2   2   2   2   2   2   2   2   2
+        ...
+    `;
+    multicolor: true;
+    color: Color.lightGreen;   // bit pair 10
+}
+// In hardware block: multicolor0: Color.white (01), multicolor1: Color.red (11)
+```
+
+**Scene safety:** When a `go` statement transitions to another scene, the compiler clears only the VIC-II sprite registers that the current scene actually touched. Scenes without sprites pay zero overhead.
 
 ### SID (Sound)
 

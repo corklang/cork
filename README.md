@@ -39,18 +39,37 @@ entry scene Game {
         background: Color.black;
     }
 
-    Ball ball;
-
-    enter {
-        poke: 0x07F8 value: spritePtr;
-        poke: 0xD015 value: 1;
-        poke: 0xD027 value: 1;
+    sprite 0 ball {
+        data: `
+            . . . . . . . . # # # # # # . . . . . . . . . .
+            . . . . . . # # # # # # # # # # . . . . . . . .
+            . . . . # # # # # # # # # # # # # # . . . . . .
+            . . # # # # # # # # # # # # # # # # # # . . . .
+            . # # # # # # # # # # # # # # # # # # # # # . .
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . . # # # # # # # # # # # # # # # # # # . . . .
+            . . . . # # # # # # # # # # # # # # . . . . . .
+            . . . . . . # # # # # # # # # # . . . . . . . .
+            . . . . . . . . # # # # # # . . . . . . . . . .
+            . . . . . . . . . . . . . . . . . . . . . . . .
+        `;
+        color: Color.white;
+        x: 100; y: 80;
     }
 
     frame {
-        ball update:;
-        poke: 0xD000 value: ball.x;
-        poke: 0xD001 value: ball.y;
+        ball.x += dx;
+        ball.y += dy;
     }
 
     raster 100 {
@@ -271,14 +290,27 @@ dotnet publish src/Cork.Compiler -c Release
 | `joystick.cork` | Move a character with the joystick |
 | `scenes.cork` | Two scenes with transitions and global state |
 | `structs.cork` | Struct with fields and methods |
+| `composition.cork` | Nested struct composition |
+| `structinit.cork` | Struct initializer syntax |
 | `word.cork` | 16-bit arithmetic, full-screen movement |
 | `forloop.cork` | For loops, break, continue |
+| `foreach.cork` | For-each on arrays, structs, strings |
 | `enumswitch.cork` | Enums and switch statements |
 | `signed.cork` | Signed byte for velocity |
 | `fixedpoint.cork` | Smooth sprite bouncing with fixed-point |
+| `casting.cork` | Type casting between byte/word/fixed |
+| `returnval.cork` | Methods with return values |
 | `gravity.cork` | Physics: gravity, dampened bouncing, sfixed multiply |
 | `raster.cork` | Raster interrupt color bars |
 | `sprite.cork` | Hardware sprite with joystick control |
+| `spriteblock.cork` | Declarative sprite blocks with auto-sync |
+| `spritepattern.cork` | Inline sprite pixel art with backtick syntax |
+| `multicolor.cork` | Multicolor sprites (4 colors, 12x21 pixels) |
+| `strings.cork` | String variables, printAt, screen codes |
+| `stringparam.cork` | Pass strings by reference to methods |
+| `arrayparam.cork` | Pass arrays by reference to methods |
+| `imports.cork` | File imports for shared code |
+| `gfxmodes.cork` | All 5 VIC-II graphics modes |
 | `combined.cork` | Everything: structs, sprites, raster, scenes, globals |
 
 ## Project Structure
@@ -295,7 +327,7 @@ tests/
   Cork.Language.Tests/        Lexer and parser tests
   Cork.CodeGen.Tests/         Code generation tests
   Cork.Integration.Tests/     Snapshot tests for all samples
-samples/                      13 example programs
+samples/                      26 example programs
 design/
   language-design.md          Language specification
   grammar.ebnf                Formal EBNF grammar
