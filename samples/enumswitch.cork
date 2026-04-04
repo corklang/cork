@@ -1,0 +1,66 @@
+// Feature: enum and switch
+
+enum State : byte {
+    title = 0,
+    playing = 1,
+    paused = 2,
+    gameover = 3
+}
+
+clearScreen: {
+    byte i = 0;
+    while (i < 250) {
+        poke: 0x0400 + i value: 32;
+        poke: 0x04FA + i value: 32;
+        poke: 0x05F4 + i value: 32;
+        poke: 0x06EE + i value: 32;
+        i += 1;
+    }
+}
+
+entry scene Game {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+    }
+
+    byte gameState = 0;
+    byte timer = 0;
+
+    enter {
+        clearScreen:;
+        gameState = State.title;
+    }
+
+    frame {
+        timer += 1;
+
+        // Constant-case switch: dispatches on enum value (CMP chain)
+        switch (gameState) {
+            case State.title:
+                poke: 0xD021 value: 6;
+                if (timer == 0) { gameState = State.playing; }
+            case State.playing:
+                poke: 0xD021 value: 5;
+                if (timer == 0) { gameState = State.paused; }
+            case State.paused:
+                poke: 0xD021 value: 7;
+                if (timer == 0) { gameState = State.gameover; }
+            case State.gameover:
+                poke: 0xD021 value: 2;
+                if (timer == 0) { gameState = State.title; }
+        }
+
+        // Expression-case switch: dispatches on conditions (if-else chain)
+        switch (true) {
+            case timer < 64:
+                poke: 0xD020 value: 0;
+            case timer < 128:
+                poke: 0xD020 value: 11;
+            case timer < 192:
+                poke: 0xD020 value: 12;
+            default:
+                poke: 0xD020 value: 15;
+        }
+    }
+}

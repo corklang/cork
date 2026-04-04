@@ -53,6 +53,9 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         foreach (var decl in program.Declarations)
             if (decl is StructDeclNode sd)
                 emitter.RegisterStructType(sd);
+        foreach (var decl in program.Declarations)
+            if (decl is EnumDeclNode ed)
+                emitter.RegisterEnumType(ed);
 
         // Allocate globals first (persist across scenes)
         foreach (var gv in globalVars)
@@ -105,6 +108,9 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         foreach (var decl in program.Declarations)
             if (decl is StructDeclNode sd)
                 emitter.RegisterStructType(sd);
+        foreach (var decl in program.Declarations)
+            if (decl is EnumDeclNode ed)
+                emitter.RegisterEnumType(ed);
         foreach (var gv in globalVars)
             emitter.AllocGlobal(gv.Name);
         foreach (var decl in program.Declarations)
@@ -140,6 +146,8 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         private readonly Dictionary<string, byte> _globals = [];
         private byte _globalZpEnd = 0x02; // globals occupy $02-$xx
 
+        // Enum support: enum name -> (member name -> value)
+        private readonly Dictionary<string, Dictionary<string, long>> _enumTypes = [];
         // Struct support
         private readonly Dictionary<string, StructDeclNode> _structTypes = [];
         // instance name -> (structType, fieldName -> zpAddr)
@@ -157,6 +165,14 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         public void RegisterStructType(StructDeclNode structDecl)
         {
             _structTypes[structDecl.Name] = structDecl;
+        }
+
+        public void RegisterEnumType(EnumDeclNode enumDecl)
+        {
+            var members = new Dictionary<string, long>();
+            foreach (var m in enumDecl.Members)
+                members[m.Name] = m.Value;
+            _enumTypes[enumDecl.Name] = members;
         }
 
         public void AllocGlobal(string name)
@@ -532,6 +548,7 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 case WhileStmt whileStmt: EmitWhile(whileStmt); break;
                 case IfStmt ifStmt: EmitIf(ifStmt); break;
                 case ForStmt forStmt: EmitFor(forStmt); break;
+                case SwitchStmt switchStmt: EmitSwitch(switchStmt); break;
                 case MessageSendStmt msgSend: EmitMessageSend(msgSend); break;
                 case GoStmt goStmt: Buffer.EmitJmpForward($"_scene_{goStmt.SceneName}"); break;
                 case BreakStmt: EmitBreak(); break;
@@ -682,6 +699,93 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             Buffer.DefineLabel(endLabel);
 
             _loopStack.Pop();
+        }
+
+        private void EmitSwitch(SwitchStmt stmt)
+        {
+            // Detect expression cases: if any case value is not a simple constant,
+            // emit as an if-else chain instead of a CMP dispatch.
+            var isExpressionSwitch = stmt.Cases.Any(c =>
+                c.Value is not IntLiteralExpr and not MemberAccessExpr);
+
+            if (isExpressionSwitch)
+                EmitExpressionSwitch(stmt);
+            else
+                EmitConstantSwitch(stmt);
+        }
+
+        private void EmitConstantSwitch(SwitchStmt stmt)
+        {
+            var endLabel = NextLabel("swend");
+
+            EmitExprToA(stmt.Subject);
+            Buffer.EmitStaZeroPage(0x0F);
+
+            for (var i = 0; i < stmt.Cases.Count; i++)
+            {
+                var caseValue = EvalConstExpr(stmt.Cases[i].Value);
+                Buffer.EmitLdaZeroPage(0x0F);
+                Buffer.EmitCmpImmediate(caseValue);
+                Buffer.EmitBne(3);
+                Buffer.EmitJmpForward($"swcase_{endLabel}_{i}");
+            }
+
+            if (stmt.DefaultBody != null)
+                Buffer.EmitJmpForward($"swdef_{endLabel}");
+            else
+                Buffer.EmitJmpForward(endLabel);
+
+            for (var i = 0; i < stmt.Cases.Count; i++)
+            {
+                Buffer.DefineLabel($"swcase_{endLabel}_{i}");
+                foreach (var s in stmt.Cases[i].Body)
+                    EmitStatement(s);
+                if (!stmt.IsFallthrough)
+                    Buffer.EmitJmpForward(endLabel);
+            }
+
+            if (stmt.DefaultBody != null)
+            {
+                Buffer.DefineLabel($"swdef_{endLabel}");
+                EmitBlock(stmt.DefaultBody);
+            }
+
+            Buffer.DefineLabel(endLabel);
+        }
+
+        private void EmitExpressionSwitch(SwitchStmt stmt)
+        {
+            // Expression cases: emit as if-else chain.
+            // switch (subject) { case expr1: body1; case expr2: body2; default: body3; }
+            // becomes: evaluate each case expr, branch if true, else next case.
+            var endLabel = NextLabel("swend");
+
+            for (var i = 0; i < stmt.Cases.Count; i++)
+            {
+                var nextLabel = (i < stmt.Cases.Count - 1)
+                    ? NextLabel($"swnext_{i}")
+                    : (stmt.DefaultBody != null ? NextLabel("swdef") : endLabel);
+
+                // Emit condition branch: if case expr is true, enter body
+                EmitConditionBranchTrue(stmt.Cases[i].Value, 3);
+                Buffer.EmitJmpForward(nextLabel);
+
+                // Case body
+                foreach (var s in stmt.Cases[i].Body)
+                    EmitStatement(s);
+                if (!stmt.IsFallthrough)
+                    Buffer.EmitJmpForward(endLabel);
+
+                if (i < stmt.Cases.Count - 1 || stmt.DefaultBody != null)
+                    Buffer.DefineLabel(nextLabel);
+            }
+
+            if (stmt.DefaultBody != null)
+            {
+                EmitBlock(stmt.DefaultBody);
+            }
+
+            Buffer.DefineLabel(endLabel);
         }
 
         private void EmitBreak()
@@ -948,7 +1052,7 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                     if (TryResolveStructField(member, out var fieldZp))
                         Buffer.EmitLdaZeroPage(fieldZp);
                     else
-                        Buffer.EmitLdaImmediate(ResolveColorConstant(member));
+                        Buffer.EmitLdaImmediate(ResolveMemberConstant(member));
                     break;
 
                 default:
@@ -976,25 +1080,34 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             }
         }
 
-        private static byte EvalConstExpr(ExprNode expr) => expr switch
+        private byte EvalConstExpr(ExprNode expr) => expr switch
         {
             IntLiteralExpr intLit => (byte)intLit.Value,
-            MemberAccessExpr member => ResolveColorConstant(member),
+            MemberAccessExpr member => ResolveMemberConstant(member),
             _ => throw new InvalidOperationException($"Cannot evaluate constant: {expr.GetType().Name}")
         };
 
-        private static byte ResolveColorConstant(MemberAccessExpr member)
+        private byte ResolveMemberConstant(MemberAccessExpr member)
         {
-            if (member.Receiver is IdentifierExpr { Name: "Color" })
+            if (member.Receiver is IdentifierExpr ident)
             {
-                return member.MemberName switch
+                // Enum lookup
+                if (_enumTypes.TryGetValue(ident.Name, out var members) &&
+                    members.TryGetValue(member.MemberName, out var value))
+                    return (byte)value;
+
+                // Built-in Color constants
+                if (ident.Name == "Color")
                 {
-                    "black" => 0, "white" => 1, "red" => 2, "cyan" => 3,
-                    "purple" => 4, "green" => 5, "blue" => 6, "yellow" => 7,
-                    "orange" => 8, "brown" => 9, "lightRed" => 10, "darkGrey" => 11,
-                    "mediumGrey" => 12, "lightGreen" => 13, "lightBlue" => 14, "lightGrey" => 15,
-                    _ => throw new InvalidOperationException($"Unknown color: {member.MemberName}")
-                };
+                    return member.MemberName switch
+                    {
+                        "black" => 0, "white" => 1, "red" => 2, "cyan" => 3,
+                        "purple" => 4, "green" => 5, "blue" => 6, "yellow" => 7,
+                        "orange" => 8, "brown" => 9, "lightRed" => 10, "darkGrey" => 11,
+                        "mediumGrey" => 12, "lightGreen" => 13, "lightBlue" => 14, "lightGrey" => 15,
+                        _ => throw new InvalidOperationException($"Unknown color: {member.MemberName}")
+                    };
+                }
             }
             throw new InvalidOperationException($"Unknown constant: {member.Receiver}");
         }

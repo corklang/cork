@@ -32,6 +32,9 @@ public sealed class Parser(List<Token> tokens)
         if (Check(TokenKind.StructKw))
             return ParseStructDecl();
 
+        if (Check(TokenKind.EnumKw) || (Check(TokenKind.FlagsKw) && PeekIs(1, TokenKind.EnumKw)))
+            return ParseEnumDecl();
+
         if (Check(TokenKind.ConstKw))
             return ParseConstDecl();
 
@@ -78,6 +81,34 @@ public sealed class Parser(List<Token> tokens)
 
         var body = ParseBlock();
         return new GlobalMethodNode(returnType, parameters, body, loc);
+    }
+
+    private EnumDeclNode ParseEnumDecl()
+    {
+        var loc = CurrentLocation;
+        var isFlags = TryConsume(TokenKind.FlagsKw);
+        Expect(TokenKind.EnumKw, "enum");
+        var name = Expect(TokenKind.Identifier, "enum name").Text;
+        Expect(TokenKind.Colon, ":");
+        var backingType = Advance().Text;
+        Expect(TokenKind.OpenBrace, "{");
+
+        var members = new List<EnumMemberNode>();
+        while (!Check(TokenKind.CloseBrace) && !IsAtEnd)
+        {
+            var memberLoc = CurrentLocation;
+            var memberName = Expect(TokenKind.Identifier, "member name").Text;
+            Expect(TokenKind.Equal, "=");
+            var valueExpr = ParseExpression();
+            var value = valueExpr is IntLiteralExpr intLit
+                ? intLit.Value
+                : throw Error("Enum member value must be an integer literal");
+            members.Add(new EnumMemberNode(memberName, value, memberLoc));
+            TryConsume(TokenKind.Comma); // optional trailing comma
+        }
+
+        Expect(TokenKind.CloseBrace, "}");
+        return new EnumDeclNode(name, backingType, isFlags, members, loc);
     }
 
     private StructDeclNode ParseStructDecl()
@@ -400,6 +431,8 @@ public sealed class Parser(List<Token> tokens)
     {
         if (Check(TokenKind.WhileKw)) return ParseWhile();
         if (Check(TokenKind.ForKw)) return ParseFor();
+        if (Check(TokenKind.SwitchKw)) return ParseSwitch(false);
+        if (Check(TokenKind.FallthroughKw) && PeekIs(1, TokenKind.SwitchKw)) return ParseSwitch(true);
         if (Check(TokenKind.IfKw)) return ParseIf();
         if (Check(TokenKind.ReturnKw)) return ParseReturn();
         if (Check(TokenKind.GoKw)) return ParseGo();
@@ -416,6 +449,51 @@ public sealed class Parser(List<Token> tokens)
 
         // Expression-based: could be assignment or message send
         return ParseExpressionStatement();
+    }
+
+    private SwitchStmt ParseSwitch(bool isFallthrough)
+    {
+        var loc = CurrentLocation;
+        if (isFallthrough) Advance(); // consume 'fallthrough'
+        Expect(TokenKind.SwitchKw, "switch");
+        Expect(TokenKind.OpenParen, "(");
+        var subject = ParseExpression();
+        Expect(TokenKind.CloseParen, ")");
+        Expect(TokenKind.OpenBrace, "{");
+
+        var cases = new List<SwitchCase>();
+        BlockNode? defaultBody = null;
+
+        while (!Check(TokenKind.CloseBrace) && !IsAtEnd)
+        {
+            if (TryConsume(TokenKind.DefaultKw))
+            {
+                Expect(TokenKind.Colon, ":");
+                var stmts = new List<StmtNode>();
+                while (!Check(TokenKind.CaseKw) && !Check(TokenKind.DefaultKw) &&
+                       !Check(TokenKind.CloseBrace) && !IsAtEnd)
+                {
+                    stmts.Add(ParseStatement());
+                }
+                defaultBody = new BlockNode(stmts, loc);
+            }
+            else
+            {
+                Expect(TokenKind.CaseKw, "case");
+                var value = ParseExpression();
+                Expect(TokenKind.Colon, ":");
+                var stmts = new List<StmtNode>();
+                while (!Check(TokenKind.CaseKw) && !Check(TokenKind.DefaultKw) &&
+                       !Check(TokenKind.CloseBrace) && !IsAtEnd)
+                {
+                    stmts.Add(ParseStatement());
+                }
+                cases.Add(new SwitchCase(value, stmts));
+            }
+        }
+
+        Expect(TokenKind.CloseBrace, "}");
+        return new SwitchStmt(subject, cases, defaultBody, isFallthrough, loc);
     }
 
     private ForStmt ParseFor()

@@ -35,6 +35,20 @@ public sealed record ConstArrayDeclNode(
     SourceLocation Location
 ) : TopLevelNode(Location);
 
+public sealed record EnumDeclNode(
+    string Name,
+    string BackingType,
+    bool IsFlags,
+    List<EnumMemberNode> Members,
+    SourceLocation Location
+) : TopLevelNode(Location);
+
+public sealed record EnumMemberNode(
+    string Name,
+    long Value,
+    SourceLocation Location
+);
+
 public sealed record StructDeclNode(
     string Name,
     List<StructFieldNode> Fields,
@@ -177,6 +191,19 @@ public sealed record ReturnStmt(
     ExprNode? Value,
     SourceLocation Location
 ) : StmtNode(Location);
+
+public sealed record SwitchStmt(
+    ExprNode Subject,
+    List<SwitchCase> Cases,
+    BlockNode? DefaultBody,
+    bool IsFallthrough,
+    SourceLocation Location
+) : StmtNode(Location);
+
+public sealed record SwitchCase(
+    ExprNode Value,
+    List<StmtNode> Body
+);
 
 public sealed record ForStmt(
     StmtNode Init,
