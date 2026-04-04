@@ -171,8 +171,22 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         ctx.Symbols.RegisterMethodParams(gm.SelectorName, gm.Parameters);
         foreach (var param in gm.Parameters)
         {
-            if (param.ParamName != "")
+            if (param.ParamName == "") continue;
+            if (param.TypeName == "string")
+            {
+                // String ref param: 3 bytes (ptr_lo, ptr_hi, length)
+                var ptrLo = ctx.Symbols.AllocGlobal($"{param.ParamName}$ptr_lo");
+                var ptrHi = ctx.Symbols.AllocGlobal($"{param.ParamName}$ptr_hi");
+                var lenZp = ctx.Symbols.AllocGlobal($"{param.ParamName}$len");
+                ctx.Symbols.RegisterRefParam(param.ParamName, ptrLo, ptrHi, lenZp);
+            }
+            else
+            {
                 ctx.Symbols.AllocGlobal(param.ParamName);
+                if (SymbolTable.Is16BitType(param.TypeName))
+                    ctx.Symbols.AllocGlobal($"_{param.ParamName}_hi"); // reserve adjacent byte
+                ctx.Symbols.SetVarType(param.ParamName, param.TypeName);
+            }
         }
     }
 

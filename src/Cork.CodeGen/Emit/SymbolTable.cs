@@ -12,6 +12,7 @@ public sealed class SymbolTable
     private readonly Dictionary<string, byte> _globals = [];
     private readonly HashSet<string> _globalNames = [];
     private readonly Dictionary<string, string> _varTypes = [];
+    private readonly Dictionary<string, string> _globalVarTypes = [];
     private readonly Dictionary<string, long> _constants = [];
     private readonly Dictionary<string, Dictionary<string, long>> _enumTypes = [];
     private readonly Dictionary<string, StructDeclNode> _structTypes = [];
@@ -22,6 +23,8 @@ public sealed class SymbolTable
     private readonly Dictionary<string, List<MethodParameter>> _methodParams = [];
     // String variables: name → (zpBase, length)
     private readonly Dictionary<string, (byte ZpBase, int Length)> _stringVars = [];
+    // Reference parameters (string/array): name → (ptrZpLo, ptrZpHi, lenZp)
+    private readonly Dictionary<string, (byte PtrLo, byte PtrHi, byte LenZp)> _refParams = [];
 
     private byte _nextZp = 0x02;
     private byte _globalZpEnd = 0x02;
@@ -68,7 +71,7 @@ public sealed class SymbolTable
         return _structArrays.TryGetValue(name, out info);
     }
 
-    public void AllocGlobal(string name)
+    public byte AllocGlobal(string name)
     {
         if (!_globals.ContainsKey(name))
         {
@@ -77,6 +80,7 @@ public sealed class SymbolTable
             _locals[name] = zp;
             _globalNames.Add(name);
         }
+        return _globals[name];
     }
 
     // --- Lookup ---
@@ -122,7 +126,19 @@ public sealed class SymbolTable
         _structInstances.Clear();
         foreach (var (name, zp) in _globals)
             _locals[name] = zp;
+        foreach (var (name, type) in _globalVarTypes)
+            _varTypes[name] = type;
         _nextZp = _globalZpEnd;
+    }
+
+    public void RegisterRefParam(string name, byte ptrLo, byte ptrHi, byte lenZp)
+    {
+        _refParams[name] = (ptrLo, ptrHi, lenZp);
+    }
+
+    public bool TryGetRefParam(string name, out (byte PtrLo, byte PtrHi, byte LenZp) info)
+    {
+        return _refParams.TryGetValue(name, out info);
     }
 
     public void RegisterStringVar(string name, byte zpBase, int length)
@@ -143,9 +159,12 @@ public sealed class SymbolTable
         _structInstances.Clear();
         _structArrays.Clear();
         _stringVars.Clear();
+        // Note: _refParams NOT cleared — global method ref params persist
         _emittedStructMethods.Clear();
         foreach (var (name, zp) in _globals)
             _locals[name] = zp;
+        foreach (var (name, type) in _globalVarTypes)
+            _varTypes[name] = type;
         _nextZp = _globalZpEnd;
     }
 
@@ -213,7 +232,13 @@ public sealed class SymbolTable
 
     // --- Variable types ---
 
-    public void SetVarType(string name, string type) => _varTypes[name] = type;
+    public void SetVarType(string name, string type)
+    {
+        _varTypes[name] = type;
+        // If set before any scene (during global init), persist it
+        if (_globals.ContainsKey(name))
+            _globalVarTypes[name] = type;
+    }
 
     // --- Locals direct access (for struct field remapping) ---
 

@@ -52,10 +52,45 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             {
                 for (var i = 0; i < msgSend.Segments.Count; i++)
                 {
-                    if (msgSend.Segments[i].Argument != null && i < methodParams.Count && methodParams[i].ParamName != "")
+                    if (msgSend.Segments[i].Argument == null || i >= methodParams.Count || methodParams[i].ParamName == "")
+                        continue;
+
+                    var arg = msgSend.Segments[i].Argument!;
+                    var param = methodParams[i];
+
+                    // String reference parameter: pass pointer + length
+                    if (param.TypeName == "string" && ctx.Symbols.TryGetRefParam(param.ParamName, out var refInfo))
                     {
-                        ctx.Expressions.EmitExprToA(msgSend.Segments[i].Argument!);
-                        ctx.Buffer.EmitStaZeroPage(ctx.Symbols.GetLocal(methodParams[i].ParamName));
+                        if (arg is IdentifierExpr strIdent && ctx.Symbols.TryGetStringVar(strIdent.Name, out var strVar))
+                        {
+                            // String variable: pointer = ZP base ($00xx)
+                            ctx.Buffer.EmitLdaImmediate(strVar.ZpBase);
+                            ctx.Buffer.EmitStaZeroPage(refInfo.PtrLo);
+                            ctx.Buffer.EmitLdaImmediate(0);
+                            ctx.Buffer.EmitStaZeroPage(refInfo.PtrHi);
+                            ctx.Buffer.EmitLdaImmediate((byte)strVar.Length);
+                            ctx.Buffer.EmitStaZeroPage(refInfo.LenZp);
+                        }
+                        else if (arg is StringLiteralExpr strLit)
+                        {
+                            // String literal: pointer = data section address
+                            var dataName = $"_str_{strLit.Value.GetHashCode():X8}";
+                            if (ctx.DataAddresses.TryGetValue(dataName, out var dataAddr))
+                            {
+                                ctx.Buffer.EmitLdaImmediate((byte)(dataAddr & 0xFF));
+                                ctx.Buffer.EmitStaZeroPage(refInfo.PtrLo);
+                                ctx.Buffer.EmitLdaImmediate((byte)(dataAddr >> 8));
+                                ctx.Buffer.EmitStaZeroPage(refInfo.PtrHi);
+                                ctx.Buffer.EmitLdaImmediate((byte)strLit.Value.Length);
+                                ctx.Buffer.EmitStaZeroPage(refInfo.LenZp);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Regular byte/word parameter
+                        ctx.Expressions.EmitExprToA(arg);
+                        ctx.Buffer.EmitStaZeroPage(ctx.Symbols.GetLocal(param.ParamName));
                     }
                 }
             }

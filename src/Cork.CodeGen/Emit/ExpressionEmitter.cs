@@ -60,6 +60,21 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 EmitSbcValue(bin.Right);
                 break;
 
+            // String/array ref param indexing: text[i] → LDA ($FB),Y via pointer
+            case IndexExpr { Receiver: IdentifierExpr refName } refIndexExpr
+                when ctx.Symbols.TryGetRefParam(refName.Name, out var refP):
+                // Load pointer into $FB/$FC
+                ctx.Buffer.EmitLdaZeroPage(refP.PtrLo);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
+                ctx.Buffer.EmitLdaZeroPage(refP.PtrHi);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
+                // Index into Y
+                EmitExprToA(refIndexExpr.Index);
+                ctx.Buffer.EmitTay();
+                // LDA ($FB),Y
+                ctx.Buffer.EmitLdaIndirectY(EmitContext.ZpPointerLo);
+                break;
+
             case IndexExpr { Receiver: IdentifierExpr arrName } indexExpr
                 when ctx.DataAddresses.TryGetValue(arrName.Name, out var dataAddr):
                 EmitExprToA(indexExpr.Index);
@@ -68,8 +83,22 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 break;
 
             case MemberAccessExpr member:
+                // text.length for ref params
+                if (member.MemberName == "length" && member.Receiver is IdentifierExpr lenIdent &&
+                    ctx.Symbols.TryGetRefParam(lenIdent.Name, out var lenRef))
+                {
+                    ctx.Buffer.EmitLdaZeroPage(lenRef.LenZp);
+                    break;
+                }
+                // text.length for string variables
+                if (member.MemberName == "length" && member.Receiver is IdentifierExpr strLenIdent &&
+                    ctx.Symbols.TryGetStringVar(strLenIdent.Name, out var strLenInfo))
+                {
+                    ctx.Buffer.EmitLdaImmediate((byte)strLenInfo.Length);
+                    break;
+                }
                 if (TryResolveForEachStructField(member))
-                    break; // already emitted
+                    break;
                 if (TryResolveStructField(member, out var fieldZp))
                     ctx.Buffer.EmitLdaZeroPage(fieldZp);
                 else

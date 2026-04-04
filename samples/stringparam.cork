@@ -1,0 +1,30 @@
+// Feature: string/array reference parameters
+
+// Reusable print function — string passed by reference
+printText: (string text) at: (word pos) {
+    for (byte i = 0; i < text.length; i += 1) {
+        poke: pos value: text[i];
+        pos += 1;
+    }
+}
+
+entry scene Demo {
+    hardware {
+        border: Color.blue;
+        background: Color.black;
+    }
+
+    string title = "CORK STRINGS!";
+    string sub = "BY REFERENCE";
+
+    enter {
+        // Pass string variables
+        printText: title at: 0x05CF;
+        printText: sub at: 0x0617;
+
+        // Pass string literal
+        printText: "INLINE TOO!" at: 0x06A7;
+    }
+
+    frame {}
+}
