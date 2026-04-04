@@ -1,0 +1,30 @@
+// Phase 5a: Raster interrupt color bars
+entry scene Demo {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+    }
+
+    raster 50 {
+        poke: 0xD020 value: 2;
+        poke: 0xD021 value: 2;
+    }
+
+    raster 100 {
+        poke: 0xD020 value: 5;
+        poke: 0xD021 value: 5;
+    }
+
+    raster 150 {
+        poke: 0xD020 value: 6;
+        poke: 0xD021 value: 6;
+    }
+
+    raster 200 {
+        poke: 0xD020 value: 0;
+        poke: 0xD021 value: 0;
+    }
+
+    frame {
+    }
+}

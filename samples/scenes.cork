@@ -11,7 +11,7 @@ entry scene Title {
         // Write "PRESS FIRE" at row 12, col 15 ($05EF = $0400 + 495)
         byte i = 0;
         while (i < 10) {
-            poke: (0x05EF + i) value: titleText[i];
+            poke: 0x05EF + i value: titleText[i];
             i += 1;
         }
     }
@@ -45,14 +45,14 @@ scene Game {
     }
 
     frame {
-        poke: (0x0400 + playerPos) value: 32;
+        poke: 0x0400 + playerPos value: 32;
 
         if (joystick.port2.left)  { playerPos -= 1; }
         if (joystick.port2.right) { playerPos += 1; }
         if (joystick.port2.up)    { playerPos -= 40; }
         if (joystick.port2.down)  { playerPos += 40; }
 
-        poke: (0x0400 + playerPos) value: 81;
+        poke: 0x0400 + playerPos value: 81;
 
         // Border color cycles through C64 colors — visual proof the global works
         score += 1;
@@ -62,10 +62,10 @@ scene Game {
     clearScreen: {
         byte i = 0;
         while (i < 250) {
-            poke: (0x0400 + i) value: 32;
-            poke: (0x04FA + i) value: 32;
-            poke: (0x05F4 + i) value: 32;
-            poke: (0x06EE + i) value: 32;
+            poke: 0x0400 + i value: 32;
+            poke: 0x04FA + i value: 32;
+            poke: 0x05F4 + i value: 32;
+            poke: 0x06EE + i value: 32;
             i += 1;
         }
     }

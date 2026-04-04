@@ -13,7 +13,7 @@ entry scene Main {
 
     frame {
         // Erase old position
-        poke: (0x0400 + playerPos) value: 32;
+        poke: 0x0400 + playerPos value: 32;
 
         // Read joystick and move
         if (joystick.port2.left)  { playerPos -= 1; }
@@ -22,16 +22,16 @@ entry scene Main {
         if (joystick.port2.down)  { playerPos += 40; }
 
         // Draw at new position
-        poke: (0x0400 + playerPos) value: 81;
+        poke: 0x0400 + playerPos value: 81;
     }
 
     clearScreen: {
         byte i = 0;
         while (i < 250) {
-            poke: (0x0400 + i) value: 32;
-            poke: (0x04FA + i) value: 32;
-            poke: (0x05F4 + i) value: 32;
-            poke: (0x06EE + i) value: 32;
+            poke: 0x0400 + i value: 32;
+            poke: 0x04FA + i value: 32;
+            poke: 0x05F4 + i value: 32;
+            poke: 0x06EE + i value: 32;
             i += 1;
         }
     }

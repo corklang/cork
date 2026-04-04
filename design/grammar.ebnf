@@ -43,6 +43,7 @@ program = { top_level_declaration } ;
 
 top_level_declaration = import_declaration
                       | global_variable_declaration
+                      | global_method_declaration
                       | resource_declaration
                       | enum_declaration
                       | struct_declaration
@@ -113,6 +114,11 @@ array_type = ( primitive_type | hardware_type | user_type )
 (* declarations.                                                         *)
 
 global_variable_declaration = variable_declaration ;
+
+(* Global methods are always in memory and callable from any scene.       *)
+(* They use the same method_declaration syntax as struct/scene methods.    *)
+(* Their code size counts against the global memory budget.               *)
+global_method_declaration = method_declaration ;
 
 (* Variable declaration — usable at global, scene, struct, or local scope*)
 (* Five forms:                                                           *)

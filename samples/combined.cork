@@ -1,0 +1,152 @@
+// Phase 5c: Everything together — structs, sprites, raster, scenes, globals
+
+struct Ball {
+    byte x = 172;
+    byte y = 100;
+    byte dx = 1;
+    byte dy = 1;
+
+    update: {
+        x += dx;
+        y += dy;
+
+        // Bounce off edges (approximate sprite visible area)
+        if (x > 235) { dx = 255; }
+        if (x < 30)  { dx = 1; }
+        if (y > 220) { dy = 255; }
+        if (y < 50)  { dy = 1; }
+    }
+}
+
+byte score = 0;
+
+clearScreen: {
+    byte i = 0;
+    while (i < 250) {
+        poke: 0x0400 + i value: 32;
+        poke: 0x04FA + i value: 32;
+        poke: 0x05F4 + i value: 32;
+        poke: 0x06EE + i value: 32;
+        i += 1;
+    }
+}
+
+entry scene Title {
+    hardware {
+        border: Color.blue;
+        background: Color.blue;
+    }
+
+    enter {
+        // Write "BOUNCE" at center
+        byte i = 0;
+        while (i < 6) {
+            poke: 0x05F1 + i value: titleText[i];
+            i += 1;
+        }
+
+        // Show sprite bouncing on title screen
+        setupBallSprite:;
+    }
+
+    Ball ball;
+
+    frame {
+        ball update:;
+
+        // Update sprite position
+        poke: 0xD000 value: ball.x;
+        poke: 0xD001 value: ball.y;
+
+        if (joystick.port2.fire) {
+            go Game;
+        }
+    }
+
+    setupBallSprite: {
+        poke: 0x07F8 value: spritePtr;
+        poke: 0xD015 value: 1;
+        poke: 0xD027 value: 1;
+    }
+}
+
+scene Game {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+    }
+
+    Ball ball;
+    byte playerPos = 120;
+
+    enter {
+        clearScreen:;
+        score = 0;
+
+        // Set up sprite for ball
+        poke: 0x07F8 value: spritePtr;
+        poke: 0xD015 value: 1;
+        poke: 0xD027 value: 1;
+    }
+
+    frame {
+        // Player (character-based)
+        poke: 0x0400 + playerPos value: 32;
+        if (joystick.port2.left)  { playerPos -= 1; }
+        if (joystick.port2.right) { playerPos += 1; }
+        poke: 0x0400 + playerPos value: 81;
+
+        // Ball (sprite-based)
+        ball update:;
+        poke: 0xD000 value: ball.x;
+        poke: 0xD001 value: ball.y;
+
+        score += 1;
+    }
+
+    raster 46 {
+        poke: 0xD020 value: 2;
+        poke: 0xD021 value: 2;
+    }
+
+    raster 100 {
+        poke: 0xD020 value: 6;
+        poke: 0xD021 value: 6;
+    }
+
+    raster 200 {
+        poke: 0xD020 value: 0;
+        poke: 0xD021 value: 0;
+    }
+}
+
+// "BOUNCE" in screen codes
+const byte[6] titleText = { 2, 15, 21, 14, 3, 5 };
+
+// Sprite pointer (address / 64)
+const byte spritePtr = 13;
+
+// Ball sprite pattern (24x21)
+const byte[63] spriteData = {
+    0x00, 0x7E, 0x00,
+    0x01, 0xFF, 0x80,
+    0x07, 0xFF, 0xE0,
+    0x0F, 0xFF, 0xF0,
+    0x1F, 0xFF, 0xF8,
+    0x3F, 0xFF, 0xFC,
+    0x3F, 0xFF, 0xFC,
+    0x7F, 0xFF, 0xFE,
+    0x7F, 0xFF, 0xFE,
+    0x7F, 0xFF, 0xFE,
+    0x7F, 0xFF, 0xFE,
+    0x7F, 0xFF, 0xFE,
+    0x3F, 0xFF, 0xFC,
+    0x3F, 0xFF, 0xFC,
+    0x1F, 0xFF, 0xF8,
+    0x0F, 0xFF, 0xF0,
+    0x07, 0xFF, 0xE0,
+    0x01, 0xFF, 0x80,
+    0x00, 0x7E, 0x00,
+    0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00
+};

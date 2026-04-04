@@ -35,6 +35,40 @@ public sealed record ConstArrayDeclNode(
     SourceLocation Location
 ) : TopLevelNode(Location);
 
+public sealed record StructDeclNode(
+    string Name,
+    List<StructFieldNode> Fields,
+    List<StructMethodNode> Methods,
+    SourceLocation Location
+) : TopLevelNode(Location);
+
+public sealed record StructFieldNode(
+    string TypeName,
+    string Name,
+    ExprNode? DefaultValue,
+    SourceLocation Location
+);
+
+public sealed record StructMethodNode(
+    string? ReturnType,
+    List<MethodParameter> Parameters,
+    BlockNode Body,
+    SourceLocation Location
+)
+{
+    public string SelectorName => string.Join("", Parameters.Select(p => p.SelectorName + ":"));
+}
+
+public sealed record GlobalMethodNode(
+    string? ReturnType,
+    List<MethodParameter> Parameters,
+    BlockNode Body,
+    SourceLocation Location
+) : TopLevelNode(Location)
+{
+    public string SelectorName => string.Join("", Parameters.Select(p => p.SelectorName + ":"));
+}
+
 public sealed record GlobalVarDeclNode(
     string TypeName,
     string Name,
@@ -62,6 +96,12 @@ public sealed record EnterBlockNode(
 
 public sealed record FrameBlockNode(
     bool IsRelaxed,
+    BlockNode Body,
+    SourceLocation Location
+) : SceneMemberNode(Location);
+
+public sealed record RasterBlockNode(
+    int Line,
     BlockNode Body,
     SourceLocation Location
 ) : SceneMemberNode(Location);

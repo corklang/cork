@@ -1,0 +1,69 @@
+// Phase 5b: Hardware sprite moving with joystick
+
+entry scene Game {
+    hardware {
+        border: Color.blue;
+        background: Color.black;
+    }
+
+    byte spriteX = 172;
+    byte spriteY = 140;
+
+    enter {
+        // Set up sprite 0
+        setupSprite:;
+    }
+
+    frame {
+        // Move sprite with joystick (clamped to visible area)
+        if (joystick.port2.left)  { if (spriteX > 26) { spriteX -= 2; } }
+        if (joystick.port2.right) { if (spriteX < 240) { spriteX += 2; } }
+        if (joystick.port2.up)    { if (spriteY > 52) { spriteY -= 2; } }
+        if (joystick.port2.down)  { if (spriteY < 230) { spriteY += 2; } }
+
+        // Update sprite position
+        poke: 0xD000 value: spriteX;
+        poke: 0xD001 value: spriteY;
+    }
+
+    setupSprite: {
+        // Point sprite 0 to our data (spriteData addr / 64)
+        poke: 0x07F8 value: spritePtr;
+
+        // Enable sprite 0
+        poke: 0xD015 value: 1;
+
+        // Sprite 0 color = white
+        poke: 0xD027 value: 1;
+
+        // Initial position
+        poke: 0xD000 value: spriteX;
+        poke: 0xD001 value: spriteY;
+    }
+}
+
+// A simple ball sprite pattern (24x21 pixels)
+const byte spritePtr = 13;
+const byte[63] spriteData = {
+    0x00, 0x7E, 0x00,
+    0x01, 0xFF, 0x80,
+    0x07, 0xFF, 0xE0,
+    0x0F, 0xFF, 0xF0,
+    0x1F, 0xFF, 0xF8,
+    0x3F, 0xFF, 0xFC,
+    0x3F, 0xFF, 0xFC,
+    0x7F, 0xFF, 0xFE,
+    0x7F, 0xFF, 0xFE,
+    0x7F, 0xFF, 0xFE,
+    0x7F, 0xFF, 0xFE,
+    0x7F, 0xFF, 0xFE,
+    0x3F, 0xFF, 0xFC,
+    0x3F, 0xFF, 0xFC,
+    0x1F, 0xFF, 0xF8,
+    0x0F, 0xFF, 0xF0,
+    0x07, 0xFF, 0xE0,
+    0x01, 0xFF, 0x80,
+    0x00, 0x7E, 0x00,
+    0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00
+};

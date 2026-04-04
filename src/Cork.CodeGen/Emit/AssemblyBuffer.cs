@@ -8,7 +8,9 @@ public sealed class AssemblyBuffer(ushort baseAddress)
 {
     private readonly List<byte> _bytes = [];
     private readonly Dictionary<string, ushort> _labels = [];
-    private readonly List<(int offset, string label)> _fixups = [];
+    private readonly List<(int offset, string label, FixupKind kind)> _fixups = [];
+
+    private enum FixupKind { Word, LoByte, HiByte }
 
     public ushort BaseAddress => baseAddress;
     public ushort CurrentAddress => (ushort)(baseAddress + _bytes.Count);
@@ -111,18 +113,32 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     public void EmitJmpForward(string label)
     {
         EmitByte(0x4C);
-        _fixups.Add((_bytes.Count, label));
-        EmitWord(0x0000); // placeholder
+        _fixups.Add((_bytes.Count, label, FixupKind.Word));
+        EmitWord(0x0000);
     }
 
-    /// <summary>
-    /// Emit a JSR with a forward reference to be patched later.
-    /// </summary>
     public void EmitJsrForward(string label)
     {
         EmitByte(0x20);
-        _fixups.Add((_bytes.Count, label));
-        EmitWord(0x0000); // placeholder
+        _fixups.Add((_bytes.Count, label, FixupKind.Word));
+        EmitWord(0x0000);
+    }
+
+    /// <summary>
+    /// Emit LDA #&lt;label; STA destLo; LDA #&gt;label; STA destHi
+    /// Used for writing a label address to a memory location (e.g., IRQ vector).
+    /// </summary>
+    public void EmitStoreAddrForward(string label, ushort destLo, ushort destHi)
+    {
+        EmitByte(0xA9); // LDA #<label
+        _fixups.Add((_bytes.Count, label, FixupKind.LoByte));
+        EmitByte(0x00);
+        EmitByte(0x8D); EmitWord(destLo); // STA destLo
+
+        EmitByte(0xA9); // LDA #>label
+        _fixups.Add((_bytes.Count, label, FixupKind.HiByte));
+        EmitByte(0x00);
+        EmitByte(0x8D); EmitWord(destHi); // STA destHi
     }
 
     /// <summary>
@@ -144,12 +160,23 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     /// </summary>
     public void ResolveFixups()
     {
-        foreach (var (offset, label) in _fixups)
+        foreach (var (offset, label, kind) in _fixups)
         {
             if (!_labels.TryGetValue(label, out var addr))
                 throw new InvalidOperationException($"Unresolved label: {label}");
-            _bytes[offset] = (byte)(addr & 0xFF);
-            _bytes[offset + 1] = (byte)(addr >> 8);
+            switch (kind)
+            {
+                case FixupKind.Word:
+                    _bytes[offset] = (byte)(addr & 0xFF);
+                    _bytes[offset + 1] = (byte)(addr >> 8);
+                    break;
+                case FixupKind.LoByte:
+                    _bytes[offset] = (byte)(addr & 0xFF);
+                    break;
+                case FixupKind.HiByte:
+                    _bytes[offset] = (byte)(addr >> 8);
+                    break;
+            }
         }
     }
 

@@ -29,14 +29,131 @@ public sealed class Parser(List<Token> tokens)
         if (Check(TokenKind.EntryKw) || Check(TokenKind.SceneKw))
             return ParseScene();
 
+        if (Check(TokenKind.StructKw))
+            return ParseStructDecl();
+
         if (Check(TokenKind.ConstKw))
             return ParseConstDecl();
 
+        // Global method: name: { ... } or returnType name: (params) { ... }
+        if (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Colon))
+            return ParseGlobalMethod();
+        if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && PeekIs(2, TokenKind.Colon))
+            return ParseGlobalMethod();
+
         // Global variable: type name = expr;
-        if (IsTypeKeyword(Current.Kind))
+        if (IsTypeKeyword(Current.Kind) || (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Identifier)))
             return ParseGlobalVarDecl();
 
         throw Error($"Expected top-level declaration, got '{Current.Text}'");
+    }
+
+    private GlobalMethodNode ParseGlobalMethod()
+    {
+        var loc = CurrentLocation;
+        string? returnType = null;
+
+        if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && PeekIs(2, TokenKind.Colon))
+            returnType = Advance().Text;
+
+        var parameters = new List<MethodParameter>();
+        while (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Colon))
+        {
+            var selectorName = Advance().Text;
+            Advance(); // colon
+
+            if (Check(TokenKind.OpenParen))
+            {
+                Advance();
+                var paramType = Advance().Text;
+                var paramName = Expect(TokenKind.Identifier, "parameter name").Text;
+                Expect(TokenKind.CloseParen, ")");
+                parameters.Add(new MethodParameter(selectorName, paramType, paramName));
+            }
+            else
+            {
+                parameters.Add(new MethodParameter(selectorName, "", ""));
+            }
+        }
+
+        var body = ParseBlock();
+        return new GlobalMethodNode(returnType, parameters, body, loc);
+    }
+
+    private StructDeclNode ParseStructDecl()
+    {
+        var loc = CurrentLocation;
+        Expect(TokenKind.StructKw, "struct");
+        var name = Expect(TokenKind.Identifier, "struct name").Text;
+        Expect(TokenKind.OpenBrace, "{");
+
+        var fields = new List<StructFieldNode>();
+        var methods = new List<StructMethodNode>();
+
+        while (!Check(TokenKind.CloseBrace) && !IsAtEnd)
+        {
+            // Method: name: { ... } or name: (type param) ... { ... }
+            if (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Colon))
+            {
+                methods.Add(ParseStructMethod());
+            }
+            // Method with return type: type name: ...
+            else if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && PeekIs(2, TokenKind.Colon))
+            {
+                methods.Add(ParseStructMethod());
+            }
+            // Field: type name [= expr];
+            else if (IsTypeKeyword(Current.Kind))
+            {
+                var fieldLoc = CurrentLocation;
+                var typeName = Advance().Text;
+                var fieldName = Expect(TokenKind.Identifier, "field name").Text;
+                ExprNode? defaultVal = null;
+                if (TryConsume(TokenKind.Equal))
+                    defaultVal = ParseExpression();
+                Expect(TokenKind.Semicolon, ";");
+                fields.Add(new StructFieldNode(typeName, fieldName, defaultVal, fieldLoc));
+            }
+            else
+            {
+                throw Error($"Expected struct field or method, got '{Current.Text}'");
+            }
+        }
+
+        Expect(TokenKind.CloseBrace, "}");
+        return new StructDeclNode(name, fields, methods, loc);
+    }
+
+    private StructMethodNode ParseStructMethod()
+    {
+        var loc = CurrentLocation;
+        string? returnType = null;
+
+        if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && PeekIs(2, TokenKind.Colon))
+            returnType = Advance().Text;
+
+        var parameters = new List<MethodParameter>();
+        while (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Colon))
+        {
+            var selectorName = Advance().Text;
+            Advance(); // colon
+
+            if (Check(TokenKind.OpenParen))
+            {
+                Advance();
+                var paramType = Advance().Text;
+                var paramName = Expect(TokenKind.Identifier, "parameter name").Text;
+                Expect(TokenKind.CloseParen, ")");
+                parameters.Add(new MethodParameter(selectorName, paramType, paramName));
+            }
+            else
+            {
+                parameters.Add(new MethodParameter(selectorName, "", ""));
+            }
+        }
+
+        var body = ParseBlock();
+        return new StructMethodNode(returnType, parameters, body, loc);
     }
 
     private SceneNode ParseScene()
@@ -62,6 +179,18 @@ public sealed class Parser(List<Token> tokens)
         var loc = CurrentLocation;
         Expect(TokenKind.ConstKw, "const");
         var typeName = Expect(IsTypeKeyword, "type").Text;
+
+        // const byte name = value; (scalar constant)
+        if (Check(TokenKind.Identifier) && !PeekIs(1, TokenKind.OpenBracket))
+        {
+            var scalarName = Advance().Text;
+            Expect(TokenKind.Equal, "=");
+            var value = ParseExpression();
+            Expect(TokenKind.Semicolon, ";");
+            return new GlobalVarDeclNode(typeName, scalarName, value, loc);
+        }
+
+        // const byte[N] name = { ... }; (array constant)
         Expect(TokenKind.OpenBracket, "[");
         var sizeExpr = ParseExpression();
         var size = sizeExpr is IntLiteralExpr intLit
@@ -113,9 +242,14 @@ public sealed class Parser(List<Token> tokens)
             return ParseRelaxedFrameBlock();
         if (Check(TokenKind.ExitKw))
             return ParseExitBlock();
+        if (Check(TokenKind.RasterKw))
+            return ParseRasterBlock();
 
-        // Scene-local variable: type name [= expr];
+        // Scene-local variable: type name [= expr]; (primitive or struct type)
         if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && !PeekIs(2, TokenKind.Colon))
+            return ParseSceneVarDecl();
+        // Struct-typed variable: StructName varName;
+        if (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Identifier) && !PeekIs(2, TokenKind.Colon))
             return ParseSceneVarDecl();
 
         // Scene method with return type: type name: ...
@@ -181,6 +315,18 @@ public sealed class Parser(List<Token> tokens)
         Expect(TokenKind.ExitKw, "exit");
         var body = ParseBlock();
         return new ExitBlockNode(body, loc);
+    }
+
+    private RasterBlockNode ParseRasterBlock()
+    {
+        var loc = CurrentLocation;
+        Expect(TokenKind.RasterKw, "raster");
+        var lineExpr = ParseExpression();
+        var line = lineExpr is IntLiteralExpr intLit
+            ? (int)intLit.Value
+            : throw Error("Raster line must be an integer literal");
+        var body = ParseBlock();
+        return new RasterBlockNode(line, body, loc);
     }
 
     private SceneVarDeclNode ParseSceneVarDecl()

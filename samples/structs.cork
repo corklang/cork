@@ -1,0 +1,56 @@
+// Phase 4: Structs with fields and methods
+
+struct Player {
+    byte pos = 120;
+    byte color = 7;
+
+    moveLeft: {
+        pos -= 1;
+    }
+
+    moveRight: {
+        pos += 1;
+    }
+}
+
+clearScreen: {
+    byte i = 0;
+    while (i < 250) {
+        poke: 0x0400 + i value: 32;
+        poke: 0x04FA + i value: 32;
+        poke: 0x05F4 + i value: 32;
+        poke: 0x06EE + i value: 32;
+        i += 1;
+    }
+}
+
+entry scene Game {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+    }
+
+    Player player;
+
+    enter {
+        clearScreen:;
+        // Customize via field access
+        player.color = 5;
+    }
+
+    frame {
+        // Erase old
+        poke: 0x0400 + player.pos value: 32;
+
+        // Move via struct methods
+        if (joystick.port2.left)  { player moveLeft:; }
+        if (joystick.port2.right) { player moveRight:; }
+
+        // Draw
+        poke: 0x0400 + player.pos value: 81;
+
+        // Border shows the struct field
+        poke: 0xD020 value: player.color;
+    }
+
+}

@@ -578,21 +578,31 @@ The compiler handles unloading the current scene's resources and loading the nex
 
 ### Global Scope
 
-Resources and state declared outside any scene are always in memory and accessible from all scenes.
+Variables, methods, and resources declared outside any scene are always in memory and accessible from all scenes. Their code and data count against the global memory budget.
 
 ```cork
 charset systemFont = import("system-font.bin");
 music titleTheme = import("title.sid");
-music gameTheme = import("game.sid");
 
 word highScore = 0;
 byte currentLevel = 1;
 
+// Global method — callable from any scene
+clearScreen: {
+    byte i = 0;
+    while (i < 250) {
+        poke: (0x0400 + i) value: 32;
+        i += 1;
+    }
+}
+
 entry scene TitleScreen {
+    enter { clearScreen:; }
     // can access highScore, systemFont, etc.
 }
 
 scene GameLevel {
+    enter { clearScreen:; }
     // can also access highScore, systemFont, etc.
 }
 ```

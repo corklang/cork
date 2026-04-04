@@ -49,14 +49,27 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 
         var emitter = new Emitter(codeBase, dataAddresses);
 
+        // Register struct types
+        foreach (var decl in program.Declarations)
+            if (decl is StructDeclNode sd)
+                emitter.RegisterStructType(sd);
+
         // Allocate globals first (persist across scenes)
         foreach (var gv in globalVars)
             emitter.AllocGlobal(gv.Name);
+        foreach (var decl in program.Declarations)
+            if (decl is GlobalMethodNode gm)
+                emitter.RegisterGlobalMethod(gm);
 
         // Emit SEI + global init
         emitter.Buffer.EmitSei();
         foreach (var gv in globalVars)
             emitter.EmitGlobalInit(gv);
+
+        // Copy sprite data (63-byte const arrays) to their target addresses
+        // Sprite pointers reference address/64 within VIC bank 0
+        // Look for matching spritePtr globals and spriteData arrays
+        emitter.EmitSpriteCopies(program, dataAddresses);
 
         // Jump to entry scene
         emitter.Buffer.EmitJmpForward($"_scene_{entryScene.Name}");
@@ -64,6 +77,11 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         // Emit all scenes
         foreach (var scene in scenes)
             emitter.EmitScene(scene);
+
+        // Emit global methods (shared across scenes)
+        var globalMethods = program.Declarations.OfType<GlobalMethodNode>().ToList();
+        foreach (var gm in globalMethods)
+            emitter.EmitGlobalMethod(gm);
 
         emitter.Buffer.ResolveFixups();
 
@@ -84,16 +102,27 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             dataAddresses[name] = (ushort)(dataStart + offset);
 
         var emitter = new Emitter(codeBase, dataAddresses);
+        foreach (var decl in program.Declarations)
+            if (decl is StructDeclNode sd)
+                emitter.RegisterStructType(sd);
         foreach (var gv in globalVars)
             emitter.AllocGlobal(gv.Name);
+        foreach (var decl in program.Declarations)
+            if (decl is GlobalMethodNode gm2)
+                emitter.RegisterGlobalMethod(gm2);
 
         emitter.Buffer.EmitSei();
         foreach (var gv in globalVars)
             emitter.EmitGlobalInit(gv);
+        emitter.EmitSpriteCopies(program, dataAddresses);
         emitter.Buffer.EmitJmpForward($"_scene_{scenes.First(s => s.IsEntry).Name}");
 
         foreach (var scene in scenes)
             emitter.EmitScene(scene);
+
+        foreach (var decl in program.Declarations)
+            if (decl is GlobalMethodNode gm)
+                emitter.EmitGlobalMethod(gm);
 
         return emitter.Buffer.ToArray();
     }
@@ -110,6 +139,18 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         private readonly Dictionary<string, List<MethodParameter>> _methodParams = [];
         private readonly Dictionary<string, byte> _globals = [];
         private byte _globalZpEnd = 0x02; // globals occupy $02-$xx
+
+        // Struct support
+        private readonly Dictionary<string, StructDeclNode> _structTypes = [];
+        // instance name -> (structType, fieldName -> zpAddr)
+        private readonly Dictionary<string, (string StructType, Dictionary<string, byte> Fields)> _structInstances = [];
+        // Pending struct method emissions: (label, structType, instanceName, methodSelectorName)
+        private readonly HashSet<string> _emittedStructMethods = [];
+
+        public void RegisterStructType(StructDeclNode structDecl)
+        {
+            _structTypes[structDecl.Name] = structDecl;
+        }
 
         public void AllocGlobal(string name)
         {
@@ -134,10 +175,70 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             }
         }
 
+        public void RegisterGlobalMethod(GlobalMethodNode gm)
+        {
+            _methodParams[gm.SelectorName] = gm.Parameters;
+            foreach (var param in gm.Parameters)
+            {
+                if (param.ParamName != "")
+                    AllocZeroPage(param.ParamName);
+            }
+        }
+
+        public void EmitSpriteCopies(ProgramNode program, Dictionary<string, ushort> dataAddresses)
+        {
+            // Find all 63-byte const arrays (sprite data) and copy them to the right VIC bank address
+            // Convention: a const byte[63] named XxxData with a matching const byte XxxPtr
+            // copies the data to address (ptrValue * 64)
+            foreach (var decl in program.Declarations)
+            {
+                if (decl is ConstArrayDeclNode { Size: 63 } constArr &&
+                    dataAddresses.TryGetValue(constArr.Name, out var srcAddr))
+                {
+                    // Find matching pointer: spritePtr, or same prefix + "Ptr"
+                    var ptrName = constArr.Name.Replace("Data", "Ptr");
+                    byte? ptrValue = null;
+                    foreach (var gv in program.Declarations.OfType<GlobalVarDeclNode>())
+                    {
+                        if (gv.Name == ptrName && gv.Initializer is IntLiteralExpr intLit)
+                        {
+                            ptrValue = (byte)intLit.Value;
+                            break;
+                        }
+                    }
+
+                    if (ptrValue == null) continue;
+
+                    var destAddr = (ushort)(ptrValue.Value * 64);
+
+                    // Emit copy loop: LDX #62; .loop: LDA src,X; STA dest,X; DEX; BPL .loop
+                    Buffer.EmitLdxImmediate(62);
+                    // LDA src,X (3 bytes)
+                    Buffer.EmitLdaAbsoluteX(srcAddr);
+                    // STA dest,X (3 bytes)
+                    Buffer.EmitStaAbsoluteX(destAddr);
+                    Buffer.EmitDex();
+                    // LDA abs,X = 3 bytes + STA abs,X = 3 bytes + DEX = 1 byte + BPL = 2 bytes = 9
+                    // BPL offset = -(3+3+1+2) = -9 from after BPL
+                    Buffer.EmitBpl(unchecked((sbyte)(-9)));
+                }
+            }
+        }
+
+        public void EmitGlobalMethod(GlobalMethodNode gm)
+        {
+            var label = $"_method_{gm.SelectorName}";
+            Buffer.DefineLabel(label);
+            EmitBlock(gm.Body);
+            Buffer.EmitRts();
+        }
+
         public void EmitScene(SceneNode scene)
         {
             // Reset scene-local ZP allocation (after globals)
             _locals.Clear();
+            _structInstances.Clear();
+            _emittedStructMethods.Clear(); // each scene gets its own struct method copies
             foreach (var (name, zp) in _globals)
                 _locals[name] = zp; // globals are accessible in all scenes
             _nextZp = _globalZpEnd;
@@ -174,21 +275,141 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 if (member is EnterBlockNode enter)
                     EmitBlock(enter.Body);
 
+            // Set up raster interrupts if any
+            var rasterBlocks = scene.Members.OfType<RasterBlockNode>()
+                .OrderBy(r => r.Line).ToList();
+            if (rasterBlocks.Count > 0)
+            {
+                AllocZeroPage($"_ridx_{scene.Name}"); // pre-allocate raster index
+                EmitRasterIrqSetup(rasterBlocks, scene.Name);
+            }
+
             // Frame loop with vsync
-            Buffer.DefineLabel("_frame_loop");
+            var frameLabel = $"_frame_loop_{scene.Name}";
+            Buffer.DefineLabel(frameLabel);
             EmitVsyncWait();
             foreach (var member in scene.Members)
             {
                 if (member is FrameBlockNode frame)
                     EmitBlock(frame.Body);
             }
-            Buffer.EmitJmpAbsolute(Buffer.GetLabel("_frame_loop"));
+            Buffer.EmitJmpAbsolute(Buffer.GetLabel(frameLabel));
 
             // Emit scene methods after the main loop
             foreach (var member in scene.Members)
             {
                 if (member is SceneMethodNode method)
                     EmitSceneMethod(method);
+            }
+
+            // Emit struct methods for instances in this scene
+            EmitPendingStructMethods(scene);
+
+            // Emit raster interrupt handler
+            if (rasterBlocks.Count > 0)
+                EmitRasterHandler(rasterBlocks, scene.Name);
+        }
+
+        private void EmitPendingStructMethods(SceneNode scene)
+        {
+            foreach (var (instanceName, inst) in _structInstances)
+            {
+                if (!_structTypes.TryGetValue(inst.StructType, out var structType)) continue;
+
+                foreach (var method in structType.Methods)
+                {
+                    var label = $"_struct_{inst.StructType}_{method.SelectorName}_{instanceName}";
+                    if (!_emittedStructMethods.Contains(label)) continue;
+
+                    Buffer.DefineLabel(label);
+
+                    // Temporarily map bare field names to this instance's ZP slots
+                    var savedLocals = new Dictionary<string, byte>();
+                    foreach (var (fieldName, zpAddr) in inst.Fields)
+                    {
+                        if (_locals.TryGetValue(fieldName, out var old))
+                            savedLocals[fieldName] = old;
+                        _locals[fieldName] = zpAddr;
+                    }
+
+                    EmitBlock(method.Body);
+                    Buffer.EmitRts();
+
+                    // Restore
+                    foreach (var (fieldName, _) in inst.Fields)
+                    {
+                        if (savedLocals.TryGetValue(fieldName, out var old))
+                            _locals[fieldName] = old;
+                        else
+                            _locals.Remove(fieldName);
+                    }
+                }
+            }
+        }
+
+        private void EmitRasterIrqSetup(List<RasterBlockNode> rasters, string sceneName)
+        {
+            // JSR to setup routine (emitted after handler so addresses are known)
+            Buffer.EmitJsrForward($"_irq_setup_{sceneName}");
+        }
+
+        private void EmitRasterHandler(List<RasterBlockNode> rasters, string sceneName)
+        {
+            var handlerLabel = $"_irq_handler_{sceneName}";
+            var setupLabel = $"_irq_setup_{sceneName}";
+            var doneLabel = $"_irq_done_{sceneName}";
+            var firstLine = (byte)rasters[0].Line;
+
+            // --- Setup routine ---
+            Buffer.DefineLabel(setupLabel);
+            Buffer.EmitLdaImmediate(0x7F);
+            Buffer.EmitStaAbsolute(0xDC0D);         // disable CIA1 interrupts
+            Buffer.EmitLdaAbsolute(0xDC0D);          // ack pending
+            Buffer.EmitLdaImmediate(firstLine);
+            Buffer.EmitStaAbsolute(0xD012);          // first raster line
+            Buffer.EmitLdaAbsolute(0xD011);
+            Buffer.EmitByte(0x29); Buffer.EmitByte(0x7F); // AND #$7F — clear bit 8
+            Buffer.EmitStaAbsolute(0xD011);
+            Buffer.EmitLdaImmediate(0x01);
+            Buffer.EmitStaAbsolute(0xD01A);          // enable VIC raster IRQ
+            Buffer.EmitStoreAddrForward(handlerLabel, 0x0314, 0x0315); // set vector
+            Buffer.EmitLdaImmediate(0);
+            Buffer.EmitStaZeroPage(GetLocal($"_ridx_{sceneName}")); // init index = 0
+            Buffer.EmitCli();                        // enable interrupts
+            Buffer.EmitRts();
+
+            // --- IRQ handler ---
+            // Uses a ZP index to track which raster block to run next.
+            // This avoids comparing against $D012 (which has timing jitter).
+            // KERNAL at $FF48 already saved A/X/Y. End with JMP $EA31.
+            var rasterIdxZp = GetLocal($"_ridx_{sceneName}");
+            Buffer.DefineLabel(handlerLabel);
+            Buffer.EmitLdaImmediate(0xFF);
+            Buffer.EmitStaAbsolute(0xD019);          // ack VIC interrupt
+
+            // Dispatch by index: LDX idx; CPX #0; BEQ block0; CPX #1; BEQ block1; ...
+            Buffer.EmitLdxZeroPage(rasterIdxZp);
+            for (var i = 0; i < rasters.Count; i++)
+            {
+                Buffer.EmitCpxImmediate((byte)i);
+                Buffer.EmitBne(3);
+                Buffer.EmitJmpForward($"_rblk_{sceneName}_{i}");
+            }
+            Buffer.EmitJmpAbsolute(0xEA31);          // fallthrough (shouldn't happen)
+
+            // Handler blocks
+            for (var i = 0; i < rasters.Count; i++)
+            {
+                var nextIdx = (byte)((i + 1) % rasters.Count);
+                var nextLine = (byte)rasters[(i + 1) % rasters.Count].Line;
+
+                Buffer.DefineLabel($"_rblk_{sceneName}_{i}");
+                EmitBlock(rasters[i].Body);
+                Buffer.EmitLdaImmediate(nextLine);
+                Buffer.EmitStaAbsolute(0xD012);      // set next raster line
+                Buffer.EmitLdaImmediate(nextIdx);
+                Buffer.EmitStaZeroPage(rasterIdxZp); // advance index
+                Buffer.EmitJmpAbsolute(0xEA31);      // exit via KERNAL
             }
         }
 
@@ -231,16 +452,38 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 
         private void EmitSceneVar(SceneVarDeclNode decl)
         {
-            var zp = AllocZeroPage(decl.Name);
+            // Struct instance: allocate ZP for each field with defaults
+            if (_structTypes.TryGetValue(decl.TypeName, out var structType))
+            {
+                var fieldMap = new Dictionary<string, byte>();
+                foreach (var field in structType.Fields)
+                {
+                    var fieldZpName = $"{decl.Name}${field.Name}";
+                    var zp = AllocZeroPage(fieldZpName);
+                    fieldMap[field.Name] = zp;
+
+                    // Initialize with default value
+                    if (field.DefaultValue is IntLiteralExpr intLit)
+                        Buffer.EmitLdaImmediate((byte)intLit.Value);
+                    else
+                        Buffer.EmitLdaImmediate(0);
+                    Buffer.EmitStaZeroPage(zp);
+                }
+                _structInstances[decl.Name] = (decl.TypeName, fieldMap);
+                return;
+            }
+
+            // Primitive variable
+            var zpAddr = AllocZeroPage(decl.Name);
             if (decl.Initializer != null)
             {
                 EmitExprToA(decl.Initializer);
-                Buffer.EmitStaZeroPage(zp);
+                Buffer.EmitStaZeroPage(zpAddr);
             }
             else
             {
                 Buffer.EmitLdaImmediate(0);
-                Buffer.EmitStaZeroPage(zp);
+                Buffer.EmitStaZeroPage(zpAddr);
             }
         }
 
@@ -281,10 +524,20 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 
         private void EmitAssignment(AssignmentStmt assign)
         {
-            if (assign.Target is not IdentifierExpr ident)
-                throw new InvalidOperationException("Phase 1: only simple variable assignments supported");
-
-            var zp = GetLocal(ident.Name);
+            // Resolve target to a ZP address
+            byte zp;
+            if (assign.Target is IdentifierExpr ident)
+            {
+                zp = GetLocal(ident.Name);
+            }
+            else if (assign.Target is MemberAccessExpr member && TryResolveStructField(member, out var fieldZp))
+            {
+                zp = fieldZp;
+            }
+            else
+            {
+                throw new InvalidOperationException("Unsupported assignment target");
+            }
             switch (assign.Op)
             {
                 case TokenKind.Equal:
@@ -405,6 +658,18 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                     case TokenKind.BangEqual:
                         Buffer.EmitBne((sbyte)skipBytes);
                         break;
+                    case TokenKind.Greater:
+                        // A > operand: Carry=1,Zero=0. BEQ skips BCS (equal=not greater).
+                        // BCS skips the JMP (greater=enter body). BCC falls to JMP (less).
+                        Buffer.EmitBeq(2);                      // equal → skip BCS, fall to JMP
+                        Buffer.EmitBcs((sbyte)skipBytes);       // greater → skip JMP, enter body
+                        break;
+                    case TokenKind.LessEqual:
+                        // A <= operand: equal or less. BEQ skips BCC+JMP (enter body).
+                        // BCC skips JMP (less=enter body). Fall to JMP (greater=skip).
+                        Buffer.EmitBeq((sbyte)(2 + skipBytes)); // equal → skip BCC+JMP
+                        Buffer.EmitBcc((sbyte)skipBytes);       // less → skip JMP
+                        break;
                     default:
                         throw new InvalidOperationException($"Unsupported comparison: {bin.Op}");
                 }
@@ -468,21 +733,40 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 return;
             }
 
+            // Struct method call: receiver methodName:;
+            if (msgSend.Receiver is IdentifierExpr receiverIdent &&
+                _structInstances.TryGetValue(receiverIdent.Name, out var inst))
+            {
+                var selectorName = string.Join("", msgSend.Segments.Select(s => s.Name + ":"));
+                var label = $"_struct_{inst.StructType}_{selectorName}_{receiverIdent.Name}";
+
+                if (!_emittedStructMethods.Contains(label))
+                {
+                    _emittedStructMethods.Add(label);
+                    // Queue for emission — will be emitted after scene code
+                }
+
+                Buffer.EmitJsrForward(label);
+                return;
+            }
+
             throw new InvalidOperationException($"Unsupported message send");
         }
 
         private void EmitPoke(ExprNode addressExpr, ExprNode valueExpr)
         {
-            // poke: (constant + variable) value: expr  →  STA abs,X
+            // poke: (constant + indexExpr) value: expr  →  LDX index; LDA value; STA base,X
             if (addressExpr is BinaryExpr { Op: TokenKind.Plus } addExpr &&
-                addExpr.Left is IntLiteralExpr baseAddr &&
-                addExpr.Right is IdentifierExpr indexVar)
+                addExpr.Left is IntLiteralExpr baseAddr)
             {
-                Buffer.EmitLdxZeroPage(GetLocal(indexVar.Name));
+                // Evaluate index to X register
+                EmitExprToA(addExpr.Right);
+                Buffer.EmitTax();
+                // Evaluate value to A
                 EmitExprToA(valueExpr);
                 Buffer.EmitStaAbsoluteX((ushort)baseAddr.Value);
             }
-            // poke: constant value: expr  →  STA abs
+            // poke: constant value: expr  →  LDA value; STA abs
             else if (addressExpr is IntLiteralExpr constAddr)
             {
                 EmitExprToA(valueExpr);
@@ -490,7 +774,7 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             }
             else
             {
-                throw new InvalidOperationException("poke address must be constant or constant + variable");
+                throw new InvalidOperationException("poke address must be constant or constant + expression");
             }
         }
 
@@ -526,7 +810,10 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                     break;
 
                 case MemberAccessExpr member:
-                    Buffer.EmitLdaImmediate(ResolveColorConstant(member));
+                    if (TryResolveStructField(member, out var fieldZp))
+                        Buffer.EmitLdaZeroPage(fieldZp);
+                    else
+                        Buffer.EmitLdaImmediate(ResolveColorConstant(member));
                     break;
 
                 default:
@@ -589,5 +876,17 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         private byte GetLocal(string name) =>
             _locals.TryGetValue(name, out var zp) ? zp
                 : throw new InvalidOperationException($"Undefined local: {name}");
+
+        private bool TryResolveStructField(MemberAccessExpr member, out byte zpAddr)
+        {
+            zpAddr = 0;
+            if (member.Receiver is IdentifierExpr ident &&
+                _structInstances.TryGetValue(ident.Name, out var instance) &&
+                instance.Fields.TryGetValue(member.MemberName, out zpAddr))
+            {
+                return true;
+            }
+            return false;
+        }
     }
 }

@@ -7,7 +7,7 @@ entry scene Hello {
     enter {
         byte i = 0;
         while (i < 11) {
-            poke: (0x0400 + i) value: helloData[i];
+            poke: 0x0400 + i value: helloData[i];
             i += 1;
         }
     }
