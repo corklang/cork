@@ -324,37 +324,106 @@ public sealed class StatementEmitter(EmitContext ctx)
         else if (op == TokenKind.StarEqual)
         {
             var varType = ctx.Symbols.GetVarTypeForZp(zpLo);
-            var isSigned = varType is "sfixed" or "sword";
-            ctx.Runtime.Add("mul8x8");
-            ctx.Runtime.Add(isSigned ? "sfixmul" : "fixmul");
+            if (varType is "fixed" or "sfixed")
+            {
+                // Fixed-point 8.8 × 8.8 → 8.8 multiply
+                var isSigned = varType == "sfixed";
+                ctx.Runtime.Add("mul8x8");
+                ctx.Runtime.Add(isSigned ? "sfixmul" : "fixmul");
+                EmitLoad16ToFixedArgs(zpLo, zpHi, value, 1);
+                ctx.Buffer.EmitJsrForward(isSigned ? "_rt_sfixmul" : "_rt_fixmul");
+                ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedResB1);
+                ctx.Buffer.EmitStaZeroPage(zpLo);
+                ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedResB2);
+                ctx.Buffer.EmitStaZeroPage(zpHi);
+            }
+            else
+            {
+                // Word 16×8 → 16 multiply (multiply by byte value)
+                ctx.Runtime.Add("mul8x8");
+                ctx.Runtime.Add("mul16x8");
+                ctx.Buffer.EmitLdaZeroPage(zpLo);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Lo);
+                ctx.Buffer.EmitLdaZeroPage(zpHi);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Hi);
+                ctx.Expressions.EmitExprToA(value);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);
+                ctx.Buffer.EmitJsrForward("_rt_mul16x8");
+                ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Lo);
+                ctx.Buffer.EmitStaZeroPage(zpLo);
+                ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
+                ctx.Buffer.EmitStaZeroPage(zpHi);
+            }
+        }
+        else if (op == TokenKind.SlashEqual)
+        {
+            var varType = ctx.Symbols.GetVarTypeForZp(zpLo);
+            if (varType is "fixed" or "sfixed")
+            {
+                // Fixed-point divide not yet implemented
+                throw new InvalidOperationException("Fixed-point divide not yet supported");
+            }
+            // Word 16÷8 → 16 quotient
+            ctx.Runtime.Add("div16x8");
             ctx.Buffer.EmitLdaZeroPage(zpLo);
             ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Lo);
             ctx.Buffer.EmitLdaZeroPage(zpHi);
             ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Hi);
-
-            if (value is IdentifierExpr mulVar && ctx.Symbols.IsWordVar(mulVar.Name))
+            ctx.Expressions.EmitExprToA(value);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);
+            ctx.Buffer.EmitJsrForward("_rt_div16x8");
+            ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Lo);
+            ctx.Buffer.EmitStaZeroPage(zpLo);
+            ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
+            ctx.Buffer.EmitStaZeroPage(zpHi);
+        }
+        else if (op == TokenKind.PercentEqual)
+        {
+            // Word 16÷8 → remainder in A
+            ctx.Runtime.Add("div16x8");
+            ctx.Buffer.EmitLdaZeroPage(zpLo);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Lo);
+            ctx.Buffer.EmitLdaZeroPage(zpHi);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Hi);
+            ctx.Expressions.EmitExprToA(value);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);
+            ctx.Buffer.EmitJsrForward("_rt_div16x8");
+            // Remainder is in ZpDivRemainder, store as word (lo only, hi=0)
+            ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpDivRemainder);
+            ctx.Buffer.EmitStaZeroPage(zpLo);
+            ctx.Buffer.EmitLdaImmediate(0);
+            ctx.Buffer.EmitStaZeroPage(zpHi);
+        }
+        else if (op is TokenKind.AmpEqual or TokenKind.PipeEqual or TokenKind.CaretEqual)
+        {
+            // Word bitwise: operate on both bytes
+            var immOp = op switch
             {
-                var srcZp = ctx.Symbols.GetLocal(mulVar.Name);
-                ctx.Buffer.EmitLdaZeroPage(srcZp);
-                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg2Lo);
-                ctx.Buffer.EmitLdaZeroPage((byte)(srcZp + 1));
-                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg2Hi);
+                TokenKind.AmpEqual => (byte)0x29,  // AND
+                TokenKind.PipeEqual => (byte)0x09,  // ORA
+                _ => (byte)0x49                      // EOR
+            };
+            var zpOp = op switch
+            {
+                TokenKind.AmpEqual => (byte)0x25,
+                TokenKind.PipeEqual => (byte)0x05,
+                _ => (byte)0x45
+            };
+            if (ctx.Expressions.TryFoldConstant(value, out var bwVal))
+            {
+                var lo = (byte)(bwVal & 0xFF);
+                var hi = (byte)(bwVal >> 8);
+                ctx.Buffer.EmitLdaZeroPage(zpLo);
+                ctx.Buffer.EmitByte(immOp); ctx.Buffer.EmitByte(lo);
+                ctx.Buffer.EmitStaZeroPage(zpLo);
+                ctx.Buffer.EmitLdaZeroPage(zpHi);
+                ctx.Buffer.EmitByte(immOp); ctx.Buffer.EmitByte(hi);
+                ctx.Buffer.EmitStaZeroPage(zpHi);
             }
             else
             {
-                var mulVal = ExpressionEmitter.Resolve16BitInitializer("", value);
-                ctx.Buffer.EmitLdaImmediate((byte)(mulVal & 0xFF));
-                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg2Lo);
-                ctx.Buffer.EmitLdaImmediate((byte)(mulVal >> 8));
-                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg2Hi);
+                throw new InvalidOperationException("Word bitwise assignment requires constant operand");
             }
-
-            ctx.Buffer.EmitJsrForward(isSigned ? "_rt_sfixmul" : "_rt_fixmul");
-
-            ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedResB1);
-            ctx.Buffer.EmitStaZeroPage(zpLo);
-            ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedResB2);
-            ctx.Buffer.EmitStaZeroPage(zpHi);
         }
         else if (op == TokenKind.ShiftRightEqual && value is IntLiteralExpr shrLit)
         {
@@ -375,6 +444,34 @@ public sealed class StatementEmitter(EmitContext ctx)
         else
         {
             throw new InvalidOperationException($"Unsupported word assignment: {op}");
+        }
+    }
+
+    private void EmitLoad16ToFixedArgs(byte zpLo, byte zpHi, ExprNode value, int argNum)
+    {
+        var dstLo = argNum == 1 ? EmitContext.ZpFixedArg1Lo : EmitContext.ZpFixedArg2Lo;
+        var dstHi = argNum == 1 ? EmitContext.ZpFixedArg1Hi : EmitContext.ZpFixedArg2Hi;
+
+        ctx.Buffer.EmitLdaZeroPage(zpLo);
+        ctx.Buffer.EmitStaZeroPage(dstLo);
+        ctx.Buffer.EmitLdaZeroPage(zpHi);
+        ctx.Buffer.EmitStaZeroPage(dstHi);
+
+        if (value is IdentifierExpr mulVar && ctx.Symbols.IsWordVar(mulVar.Name))
+        {
+            var srcZp = ctx.Symbols.GetLocal(mulVar.Name);
+            ctx.Buffer.EmitLdaZeroPage(srcZp);
+            ctx.Buffer.EmitStaZeroPage(argNum == 1 ? EmitContext.ZpFixedArg2Lo : EmitContext.ZpFixedArg1Lo);
+            ctx.Buffer.EmitLdaZeroPage((byte)(srcZp + 1));
+            ctx.Buffer.EmitStaZeroPage(argNum == 1 ? EmitContext.ZpFixedArg2Hi : EmitContext.ZpFixedArg1Hi);
+        }
+        else
+        {
+            var v = ExpressionEmitter.Resolve16BitInitializer("", value);
+            ctx.Buffer.EmitLdaImmediate((byte)(v & 0xFF));
+            ctx.Buffer.EmitStaZeroPage(argNum == 1 ? EmitContext.ZpFixedArg2Lo : EmitContext.ZpFixedArg1Lo);
+            ctx.Buffer.EmitLdaImmediate((byte)(v >> 8));
+            ctx.Buffer.EmitStaZeroPage(argNum == 1 ? EmitContext.ZpFixedArg2Hi : EmitContext.ZpFixedArg1Hi);
         }
     }
 }

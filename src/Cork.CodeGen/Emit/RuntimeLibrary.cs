@@ -12,7 +12,9 @@ public sealed class RuntimeLibrary(EmitContext ctx)
 
         EmitMultiplyRoutines();
         EmitSignedMultiply();
+        EmitMultiply16x8();
         EmitDivideRoutine();
+        EmitDivide16x8();
         EmitDebugRoutines();
     }
 
@@ -95,6 +97,64 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         ctx.Buffer.EmitAdcZeroPage(EmitContext.ZpMulResultLo);
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedResB2);
 
+        ctx.Buffer.EmitRts();
+    }
+
+    private void EmitMultiply16x8()
+    {
+        if (!ctx.Runtime.Contains("mul16x8")) return;
+
+        // 16×8 unsigned multiply: ZpFixedArg1(lo/hi) × ZpMulB → result in ZpFixedArg1(lo/hi)
+        // Uses two 8×8 multiplies: (lo × B) + (hi × B) << 8
+        ctx.Buffer.DefineLabel("_rt_mul16x8");
+        // Save high byte
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
+        ctx.Buffer.EmitPha();
+        // lo × B
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Lo);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);
+        ctx.Buffer.EmitJsrForward("_rt_mul8x8");
+        // Result: lo in ZpMulResultLo, hi in ZpMulResultHi
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulResultLo);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Lo); // result lo
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulResultHi);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Hi); // partial result hi
+        // hi × B (only need low byte since hi byte would overflow 16 bits)
+        ctx.Buffer.EmitPla(); // restore original hi
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);
+        ctx.Buffer.EmitJsrForward("_rt_mul8x8");
+        // Add low byte of (hi×B) to result high byte
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
+        ctx.Buffer.EmitClc();
+        ctx.Buffer.EmitAdcZeroPage(EmitContext.ZpMulResultLo);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Hi);
+        ctx.Buffer.EmitRts();
+    }
+
+    private void EmitDivide16x8()
+    {
+        if (!ctx.Runtime.Contains("div16x8")) return;
+
+        // 16÷8 unsigned divide: ZpFixedArg1(lo/hi) / ZpMulB
+        // → quotient in ZpFixedArg1(lo/hi), remainder in ZpDivRemainder
+        ctx.Buffer.DefineLabel("_rt_div16x8");
+        ctx.Buffer.EmitLdaImmediate(0);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpDivRemainder);
+        ctx.Buffer.EmitLdxImmediate(16);
+        // Loop: shift dividend left into remainder
+        ctx.Buffer.EmitAslZeroPage(EmitContext.ZpFixedArg1Lo);
+        ctx.Buffer.EmitRolZeroPage(EmitContext.ZpFixedArg1Hi);
+        ctx.Buffer.EmitRolZeroPage(EmitContext.ZpDivRemainder);
+        // Try subtract divisor
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpDivRemainder);
+        ctx.Buffer.EmitSec();
+        ctx.Buffer.EmitSbcZeroPage(EmitContext.ZpMulB);
+        ctx.Buffer.EmitBcc(4); // if remainder < divisor, skip
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpDivRemainder);
+        ctx.Buffer.EmitByte(0xE6); ctx.Buffer.EmitByte(EmitContext.ZpFixedArg1Lo); // INC zpLo (set quotient bit)
+        ctx.Buffer.EmitDex();
+        // Loop body: ASL(2)+ROL(2)+ROL(2)+LDA(2)+SEC(1)+SBC(2)+BCC(2)+STA(2)+INC(2)+DEX(1)+BNE(2) = 20
+        ctx.Buffer.EmitBne(unchecked((sbyte)(-20)));
         ctx.Buffer.EmitRts();
     }
 

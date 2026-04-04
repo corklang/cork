@@ -822,15 +822,14 @@ import Cork.Text;       // text rendering helpers
 
 ### Arithmetic
 
-| Op | Example | Notes |
-|----|---------|-------|
-| `+` | `x + 3` | 8-bit add (CLC/ADC). 16-bit for word/fixed types. |
-| `-` | `x - 1` | 8-bit subtract (SEC/SBC). 16-bit for word/fixed. |
-| `*` | `x * 5` | 8×8→8 multiply (runtime library, ~150 cycles). Constant operands fold at compile time. |
-| `/` | `x / 10` | 8÷8 unsigned divide (runtime library, ~200 cycles). Returns quotient. |
-| `%` | `x % 10` | 8÷8 unsigned modulo (same divide routine). Returns remainder. |
+| Op | byte | word | fixed/sfixed | Notes |
+|----|------|------|-------------|-------|
+| `+` `-` | Yes | Yes | Yes | CLC/ADC, SEC/SBC. 16-bit for word/fixed. |
+| `*` | Yes | Yes (16×8) | Yes (8.8×8.8) | Runtime multiply library. Constant operands fold. |
+| `/` | Yes | Yes (16÷8) | — | Runtime divide library. Returns quotient. |
+| `%` | Yes | Yes (16÷8) | — | Same divide routine. Returns remainder. |
 
-Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=` all supported.
+Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=` all supported for byte and word. Fixed-point supports `+=`, `-=`, `*=`.
 
 ### Bitwise
 
@@ -842,7 +841,7 @@ Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=` all supported.
 | `<<` | `x << 3` | Shift left (count must be constant, emits N × ASL A) |
 | `>>` | `x >> 2` | Shift right (count must be constant, emits N × LSR A) |
 
-Compound assignment: `&=`, `|=`, `^=`, `<<=`, `>>=` all supported.
+Compound assignment: `&=`, `|=`, `^=`, `<<=`, `>>=` all supported for byte and word types.
 
 ### Comparison
 
