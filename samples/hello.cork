@@ -1,0 +1,19 @@
+entry scene Hello {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+    }
+
+    enter {
+        byte i = 0;
+        while (i < 11) {
+            poke: (0x0400 + i) value: helloData[i];
+            i += 1;
+        }
+    }
+
+    frame {
+    }
+}
+
+const byte[11] helloData = { 8, 5, 12, 12, 15, 32, 23, 15, 18, 12, 4 };

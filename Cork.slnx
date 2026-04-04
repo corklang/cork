@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Cork.Compiler/Cork.Compiler.csproj" />
+    <Project Path="src/Cork.Language/Cork.Language.csproj" />
+    <Project Path="src/Cork.CodeGen/Cork.CodeGen.csproj" />
+    <Project Path="src/Cork.Output/Cork.Output.csproj" />
+    <Project Path="src/Cork.Runtime/Cork.Runtime.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Cork.Language.Tests/Cork.Language.Tests.csproj" />
+    <Project Path="tests/Cork.CodeGen.Tests/Cork.CodeGen.Tests.csproj" />
+    <Project Path="tests/Cork.Integration.Tests/Cork.Integration.Tests.csproj" />
+  </Folder>
+</Solution>

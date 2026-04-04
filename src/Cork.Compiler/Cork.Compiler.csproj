@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cork.Language\Cork.Language.csproj" />
+    <ProjectReference Include="..\Cork.CodeGen\Cork.CodeGen.csproj" />
+    <ProjectReference Include="..\Cork.Output\Cork.Output.csproj" />
+    <ProjectReference Include="..\Cork.Runtime\Cork.Runtime.csproj" />
+  </ItemGroup>
+</Project>
