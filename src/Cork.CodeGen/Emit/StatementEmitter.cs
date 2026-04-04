@@ -360,8 +360,19 @@ public sealed class StatementEmitter(EmitContext ctx)
             var varType = ctx.Symbols.GetVarTypeForZp(zpLo);
             if (varType is "fixed" or "sfixed")
             {
-                // Fixed-point divide not yet implemented
-                throw new InvalidOperationException("Fixed-point divide not yet supported");
+                var isSigned = varType == "sfixed";
+                ctx.Runtime.Add("fixdiv");
+                if (isSigned) ctx.Runtime.Add("sfixdiv");
+                // Load dividend (arg1) and divisor (arg2)
+                EmitLoad16ToFixedArgs(zpLo, zpHi, value, 1);
+                ctx.Buffer.EmitJsrForward(isSigned ? "_rt_sfixdiv" : "_rt_fixdiv");
+                // Result: quotient hi in ZpFixedArg1Hi, lo in ZpFixedArg1Lo
+                // 8.8 format: hi = integer part, lo = fractional part
+                ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Lo);
+                ctx.Buffer.EmitStaZeroPage(zpLo);
+                ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
+                ctx.Buffer.EmitStaZeroPage(zpHi);
+                return; // skip word path
             }
             // Word 16÷8 → 16 quotient
             ctx.Runtime.Add("div16x8");

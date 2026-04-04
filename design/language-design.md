@@ -826,10 +826,10 @@ import Cork.Text;       // text rendering helpers
 |----|------|------|-------------|-------|
 | `+` `-` | Yes | Yes | Yes | CLC/ADC, SEC/SBC. 16-bit for word/fixed. |
 | `*` | Yes | Yes (16×8) | Yes (8.8×8.8) | Runtime multiply library. Constant operands fold. |
-| `/` | Yes | Yes (16÷8) | — | Runtime divide library. Returns quotient. |
+| `/` | Yes | Yes (16÷8) | Yes (8.8÷8.8) | Runtime divide library. Returns quotient. |
 | `%` | Yes | Yes (16÷8) | — | Same divide routine. Returns remainder. |
 
-Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=` all supported for byte and word. Fixed-point supports `+=`, `-=`, `*=`.
+Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=` all supported for byte, word, and fixed/sfixed.
 
 ### Bitwise
 

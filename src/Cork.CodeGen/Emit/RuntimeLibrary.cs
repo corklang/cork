@@ -15,6 +15,8 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         EmitMultiply16x8();
         EmitDivideRoutine();
         EmitDivide16x8();
+        EmitFixedDivide();
+        EmitSignedFixedDivide();
         EmitDebugRoutines();
     }
 
@@ -155,6 +157,130 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         ctx.Buffer.EmitDex();
         // Loop body: ASL(2)+ROL(2)+ROL(2)+LDA(2)+SEC(1)+SBC(2)+BCC(2)+STA(2)+INC(2)+DEX(1)+BNE(2) = 20
         ctx.Buffer.EmitBne(unchecked((sbyte)(-20)));
+        ctx.Buffer.EmitRts();
+    }
+
+    private void EmitFixedDivide()
+    {
+        if (!ctx.Runtime.Contains("fixdiv")) return;
+
+        // 8.8 ÷ 8.8 → 8.8 unsigned fixed-point divide
+        // Dividend in ZpFixedArg1(lo/hi), Divisor in ZpFixedArg2(lo/hi)
+        // Result in ZpFixedArg1(lo/hi)
+        //
+        // Algorithm: 24÷16→24 divide with 24 iterations.
+        // Dividend = original << 8 = [B2:B1:B0] = [hi:lo:00] (24 bits).
+        // Quotient builds in [ResB2:Arg1Hi:Arg1Lo] (24 bits, we take lo 16).
+        // Remainder in [MulA:DivRemainder] (16 bits).
+        ctx.Buffer.DefineLabel("_rt_fixdiv");
+
+        // Set up 24-bit dividend: [B2:B1:B0] = [Arg1Hi:Arg1Lo:0]
+        ctx.Buffer.EmitLdaImmediate(0);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedResB0);
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Lo);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedResB1);
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedResB2);
+
+        // Clear remainder and quotient
+        ctx.Buffer.EmitLdaImmediate(0);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpDivRemainder);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Lo);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Hi);
+
+        ctx.Buffer.EmitLdxImmediate(24);
+
+        // --- Loop ---
+        // Shift dividend left into remainder                       bytes
+        ctx.Buffer.EmitAslZeroPage(EmitContext.ZpFixedResB0);   // 2
+        ctx.Buffer.EmitRolZeroPage(EmitContext.ZpFixedResB1);   // 2
+        ctx.Buffer.EmitRolZeroPage(EmitContext.ZpFixedResB2);   // 2
+        ctx.Buffer.EmitRolZeroPage(EmitContext.ZpDivRemainder); // 2
+        ctx.Buffer.EmitRolZeroPage(EmitContext.ZpMulA);          // 2 = 10
+        // Shift quotient left
+        ctx.Buffer.EmitAslZeroPage(EmitContext.ZpFixedArg1Lo);  // 2
+        ctx.Buffer.EmitRolZeroPage(EmitContext.ZpFixedArg1Hi);  // 2 = 14
+        // Try subtract divisor from remainder
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpDivRemainder); // 2
+        ctx.Buffer.EmitSec();                                    // 1
+        ctx.Buffer.EmitSbcZeroPage(EmitContext.ZpFixedArg2Lo);  // 2
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);          // 2
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulA);          // 2
+        ctx.Buffer.EmitSbcZeroPage(EmitContext.ZpFixedArg2Hi);  // 2 = 25
+        // BCC +8: skip commit if remainder < divisor
+        ctx.Buffer.EmitBcc(8);                                   // 2 = 27
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);          // 2
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulB);          // 2
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpDivRemainder); // 2
+        ctx.Buffer.EmitByte(0xE6); ctx.Buffer.EmitByte(EmitContext.ZpFixedArg1Lo); // 2 = 35
+        ctx.Buffer.EmitDex();                                    // 1 = 36
+        ctx.Buffer.EmitBne(unchecked((sbyte)(-38)));             // 2 = 38
+
+        // Result: 24-bit quotient in [??:Arg1Hi:Arg1Lo]
+        // We want the bottom 16 bits = Arg1Hi:Arg1Lo — already in place
+        ctx.Buffer.EmitRts();
+    }
+
+    private void EmitSignedFixedDivide()
+    {
+        if (!ctx.Runtime.Contains("sfixdiv")) return;
+
+        // Signed 8.8 ÷ 8.8: check signs, make positive, divide, negate if needed
+        ctx.Buffer.DefineLabel("_rt_sfixdiv");
+
+        // Clear sign flag
+        ctx.Buffer.EmitLdaImmediate(0);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpSignFlag);
+
+        // Check arg1 sign (hi byte bit 7)
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
+        // BPL: skip negate block (INC(2)+LDA(2)+EOR(2)+CLC(1)+ADC(2)+STA(2)+LDA(2)+EOR(2)+ADC(2)+STA(2)=19)
+        ctx.Buffer.EmitBpl(19);
+        // Negate arg1: flip sign flag, two's complement
+        ctx.Buffer.EmitByte(0xE6); ctx.Buffer.EmitByte(EmitContext.ZpSignFlag); // INC sign
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Lo);
+        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF); // EOR #$FF
+        ctx.Buffer.EmitClc();
+        ctx.Buffer.EmitAdcImmediate(1);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Lo);
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
+        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF);
+        ctx.Buffer.EmitAdcImmediate(0);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Hi);
+
+        // Check arg2 sign
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg2Hi);
+        ctx.Buffer.EmitBpl(19);
+        ctx.Buffer.EmitByte(0xE6); ctx.Buffer.EmitByte(EmitContext.ZpSignFlag);
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg2Lo);
+        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF);
+        ctx.Buffer.EmitClc();
+        ctx.Buffer.EmitAdcImmediate(1);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg2Lo);
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg2Hi);
+        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF);
+        ctx.Buffer.EmitAdcImmediate(0);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg2Hi);
+
+        // Do unsigned divide
+        ctx.Buffer.EmitJsrForward("_rt_fixdiv");
+
+        // If sign flag is odd, negate result
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpSignFlag);
+        ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(0x01); // AND #1
+        // BEQ: skip negate (LDA(2)+EOR(2)+CLC(1)+ADC(2)+STA(2)+LDA(2)+EOR(2)+ADC(2)+STA(2)=17)
+        ctx.Buffer.EmitBeq(17);
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Lo);
+        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF);
+        ctx.Buffer.EmitClc();
+        ctx.Buffer.EmitAdcImmediate(1);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Lo);
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
+        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF);
+        ctx.Buffer.EmitAdcImmediate(0);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Hi);
+
         ctx.Buffer.EmitRts();
     }
 
