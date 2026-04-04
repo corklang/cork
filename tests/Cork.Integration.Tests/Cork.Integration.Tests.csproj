@@ -9,8 +9,6 @@
     <PackageReference Include="TUnit" Version="*" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Cork.Language\Cork.Language.csproj" />
-    <ProjectReference Include="..\..\src\Cork.CodeGen\Cork.CodeGen.csproj" />
-    <ProjectReference Include="..\..\src\Cork.Output\Cork.Output.csproj" />
+    <ProjectReference Include="..\..\src\Cork.Compiler\Cork.Compiler.csproj" />
   </ItemGroup>
 </Project>

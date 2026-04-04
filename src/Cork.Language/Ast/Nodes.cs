@@ -302,6 +302,12 @@ public sealed record MessageSendExpr(
     SourceLocation Location
 ) : ExprNode(Location);
 
+public sealed record CastExpr(
+    ExprNode Operand,
+    string TargetType,
+    SourceLocation Location
+) : ExprNode(Location);
+
 public sealed record ArrayInitExpr(
     List<ExprNode> Elements,
     SourceLocation Location

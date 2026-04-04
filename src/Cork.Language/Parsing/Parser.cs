@@ -837,7 +837,18 @@ public sealed class Parser(List<Token> tokens)
             var op = Advance().Kind;
             return new UnaryExpr(op, ParseUnary(), loc);
         }
-        return ParsePostfix(ParsePrimary());
+        return ParseCast();
+    }
+
+    private ExprNode ParseCast()
+    {
+        var expr = ParsePostfix(ParsePrimary());
+        if (TryConsume(TokenKind.AsKw))
+        {
+            var targetType = Advance().Text;
+            return new CastExpr(expr, targetType, expr.Location);
+        }
+        return expr;
     }
 
     private ExprNode ParsePostfix(ExprNode left)

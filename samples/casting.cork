@@ -1,0 +1,32 @@
+// Feature: "as" type casting
+
+entry scene Demo {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+    }
+
+    word bigScore = 1000;
+    fixed speed = 3.75;
+
+    enter {
+        // Narrowing: word to byte (keeps low byte)
+        byte scoreLo = bigScore as byte;
+        poke: 0x0400 value: scoreLo;
+
+        // Fixed to byte (extracts integer part)
+        byte wholeSpeed = speed as byte;
+        poke: 0x0401 value: wholeSpeed;
+
+        // Byte to word (widens)
+        byte small = 42;
+        word big = small as word;
+        debugHex: 40 value: big;
+
+        // Show results as border color (3 = cyan from speed integer part)
+        poke: 0xD020 value: wholeSpeed;
+    }
+
+    frame {
+    }
+}
