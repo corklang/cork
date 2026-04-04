@@ -30,8 +30,21 @@ public sealed class ExpressionEmitter(EmitContext ctx)
             case IdentifierExpr ident:
                 if (ctx.ForEachVar is { } fev && fev.Name == ident.Name)
                 {
-                    ctx.Buffer.EmitLdxZeroPage(fev.IndexZp);
-                    ctx.Buffer.EmitLdaAbsoluteX(fev.DataAddr);
+                    if (ctx.ForEachRefParam is { } frp)
+                    {
+                        // For-each over ref param: LDA (ptr),Y via indirect indexed
+                        ctx.Buffer.EmitLdaZeroPage(frp.PtrLo);
+                        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
+                        ctx.Buffer.EmitLdaZeroPage(frp.PtrHi);
+                        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
+                        ctx.Buffer.EmitLdyZeroPage(fev.IndexZp);
+                        ctx.Buffer.EmitLdaIndirectY(EmitContext.ZpPointerLo);
+                    }
+                    else
+                    {
+                        ctx.Buffer.EmitLdxZeroPage(fev.IndexZp);
+                        ctx.Buffer.EmitLdaAbsoluteX(fev.DataAddr);
+                    }
                 }
                 // Inside for-each struct method: bare field names resolve to indexed access
                 else if (ctx.ForEachStructVar is { } fesv2 &&

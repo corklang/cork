@@ -133,6 +133,45 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             return;
         }
 
+        // Ref param (string or byte[]): for (ch in data) where data is a ref param
+        if (forEach.Collection is IdentifierExpr refIdent &&
+            ctx.Symbols.TryGetRefParam(refIdent.Name, out var refParam))
+        {
+            var idxZp = ctx.Symbols.AllocZeroPage($"_foreach_idx");
+            var loopLabel = ctx.NextLabel("feloop");
+            var stepLabel = ctx.NextLabel("festep");
+            var endLabel = ctx.NextLabel("feend");
+
+            ctx.Buffer.EmitLdaImmediate(0);
+            ctx.Buffer.EmitStaZeroPage(idxZp);
+
+            ctx.LoopStack.Push((endLabel, stepLabel));
+
+            ctx.Buffer.DefineLabel(loopLabel);
+            ctx.Buffer.EmitLdaZeroPage(idxZp);
+            ctx.Buffer.EmitCmpZeroPage(refParam.LenZp);
+            ctx.Buffer.EmitBcc(3);
+            ctx.Buffer.EmitJmpForward(endLabel);
+
+            // Register loop variable — resolves via ref param's pointer
+            ctx.ForEachVar = (forEach.VarName, 0, idxZp); // dataAddr unused, we override in expression
+            ctx.ForEachRefParam = refParam;
+
+            ctx.Statements.EmitBlock(forEach.Body);
+
+            ctx.ForEachVar = null;
+            ctx.ForEachRefParam = null;
+
+            ctx.Buffer.DefineLabel(stepLabel);
+            ctx.Buffer.EmitIncZeroPage(idxZp);
+
+            ctx.Buffer.EmitJmpAbsolute(ctx.Buffer.GetLabel(loopLabel));
+            ctx.Buffer.DefineLabel(endLabel);
+
+            ctx.LoopStack.Pop();
+            return;
+        }
+
         throw new InvalidOperationException("for-each: unsupported collection type");
     }
 

@@ -48,8 +48,10 @@ public sealed class EmitContext
 
     // For-each over const byte array: (varName, dataAddr, indexZp)
     public (string Name, ushort DataAddr, byte IndexZp)? ForEachVar { get; set; }
-    // For-each over struct array: (varName, structType, fieldBases, indexZp, arraySize)
+    // For-each over struct array
     public (string Name, string StructType, Dictionary<string, byte> FieldBases, byte IndexZp)? ForEachStructVar { get; set; }
+    // For-each over ref param (string/array passed by reference)
+    public (byte PtrLo, byte PtrHi, byte LenZp)? ForEachRefParam { get; set; }
 
     // Const array sizes (populated during code generation)
     private readonly Dictionary<string, int> _constArraySizes = [];

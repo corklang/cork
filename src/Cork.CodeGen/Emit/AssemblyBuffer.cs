@@ -43,6 +43,9 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     // LDA indirect indexed
     public void EmitLdaIndirectY(byte zpAddr) { EmitByte(0xB1); EmitByte(zpAddr); }
 
+    // LDY zero page
+    public void EmitLdyZeroPage(byte addr) { EmitByte(0xA4); EmitByte(addr); }
+
     // LDX
     public void EmitLdxImmediate(byte value) { EmitByte(0xA2); EmitByte(value); }
     public void EmitLdxZeroPage(byte addr) { EmitByte(0xA6); EmitByte(addr); }
