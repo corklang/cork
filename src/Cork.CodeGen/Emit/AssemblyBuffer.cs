@@ -40,6 +40,9 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     public void EmitLdaAbsoluteX(ushort addr) { EmitByte(0xBD); EmitWord(addr); }
     public void EmitLdaAbsoluteY(ushort addr) { EmitByte(0xB9); EmitWord(addr); }
 
+    // LDA indirect indexed
+    public void EmitLdaIndirectY(byte zpAddr) { EmitByte(0xB1); EmitByte(zpAddr); }
+
     // LDX
     public void EmitLdxImmediate(byte value) { EmitByte(0xA2); EmitByte(value); }
     public void EmitLdxZeroPage(byte addr) { EmitByte(0xA6); EmitByte(addr); }
@@ -51,6 +54,7 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     public void EmitStaZeroPage(byte addr) { EmitByte(0x85); EmitByte(addr); }
     public void EmitStaAbsolute(ushort addr) { EmitByte(0x8D); EmitWord(addr); }
     public void EmitStaAbsoluteX(ushort addr) { EmitByte(0x9D); EmitWord(addr); }
+    public void EmitStaIndirectY(byte zpAddr) { EmitByte(0x91); EmitByte(zpAddr); }
 
     // STX
     public void EmitStxZeroPage(byte addr) { EmitByte(0x86); EmitByte(addr); }

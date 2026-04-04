@@ -144,8 +144,13 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         private readonly Dictionary<string, StructDeclNode> _structTypes = [];
         // instance name -> (structType, fieldName -> zpAddr)
         private readonly Dictionary<string, (string StructType, Dictionary<string, byte> Fields)> _structInstances = [];
-        // Pending struct method emissions: (label, structType, instanceName, methodSelectorName)
+        // Pending struct method emissions
         private readonly HashSet<string> _emittedStructMethods = [];
+        // Type tracking: variable name -> "byte" or "word"
+        private readonly Dictionary<string, string> _varTypes = [];
+        // ZP pointer for indirect indexed addressing
+        private const byte ZpPointerLo = 0xFB;
+        private const byte ZpPointerHi = 0xFC;
 
         public void RegisterStructType(StructDeclNode structDecl)
         {
@@ -237,8 +242,9 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         {
             // Reset scene-local ZP allocation (after globals)
             _locals.Clear();
+            _varTypes.Clear();
             _structInstances.Clear();
-            _emittedStructMethods.Clear(); // each scene gets its own struct method copies
+            _emittedStructMethods.Clear();
             foreach (var (name, zp) in _globals)
                 _locals[name] = zp; // globals are accessible in all scenes
             _nextZp = _globalZpEnd;
@@ -473,17 +479,39 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 return;
             }
 
-            // Primitive variable
-            var zpAddr = AllocZeroPage(decl.Name);
+            // Word variable
+            if (decl.TypeName == "word")
+            {
+                var zpAddr = AllocWordZeroPage(decl.Name);
+                if (decl.Initializer is IntLiteralExpr wordLit)
+                {
+                    var val = (ushort)wordLit.Value;
+                    Buffer.EmitLdaImmediate((byte)(val & 0xFF));
+                    Buffer.EmitStaZeroPage(zpAddr);
+                    Buffer.EmitLdaImmediate((byte)(val >> 8));
+                    Buffer.EmitStaZeroPage((byte)(zpAddr + 1));
+                }
+                else
+                {
+                    Buffer.EmitLdaImmediate(0);
+                    Buffer.EmitStaZeroPage(zpAddr);
+                    Buffer.EmitStaZeroPage((byte)(zpAddr + 1));
+                }
+                return;
+            }
+
+            // Byte variable
+            var zpAddr2 = AllocZeroPage(decl.Name);
+            _varTypes[decl.Name] = "byte";
             if (decl.Initializer != null)
             {
                 EmitExprToA(decl.Initializer);
-                Buffer.EmitStaZeroPage(zpAddr);
+                Buffer.EmitStaZeroPage(zpAddr2);
             }
             else
             {
                 Buffer.EmitLdaImmediate(0);
-                Buffer.EmitStaZeroPage(zpAddr);
+                Buffer.EmitStaZeroPage(zpAddr2);
             }
         }
 
@@ -509,26 +537,60 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 
         private void EmitVarDecl(VarDeclStmt decl)
         {
-            var zp = AllocZeroPage(decl.Name);
-            if (decl.Initializer != null)
+            if (decl.TypeName == "word")
             {
-                EmitExprToA(decl.Initializer);
-                Buffer.EmitStaZeroPage(zp);
+                var zp = AllocWordZeroPage(decl.Name);
+                if (decl.Initializer is IntLiteralExpr intLit)
+                {
+                    var val = (ushort)intLit.Value;
+                    Buffer.EmitLdaImmediate((byte)(val & 0xFF));
+                    Buffer.EmitStaZeroPage(zp);
+                    Buffer.EmitLdaImmediate((byte)(val >> 8));
+                    Buffer.EmitStaZeroPage((byte)(zp + 1));
+                }
+                else
+                {
+                    Buffer.EmitLdaImmediate(0);
+                    Buffer.EmitStaZeroPage(zp);
+                    Buffer.EmitStaZeroPage((byte)(zp + 1));
+                }
             }
             else
             {
-                Buffer.EmitLdaImmediate(0);
-                Buffer.EmitStaZeroPage(zp);
+                var zp = AllocZeroPage(decl.Name);
+                _varTypes[decl.Name] = "byte";
+                if (decl.Initializer != null)
+                {
+                    EmitExprToA(decl.Initializer);
+                    Buffer.EmitStaZeroPage(zp);
+                }
+                else
+                {
+                    Buffer.EmitLdaImmediate(0);
+                    Buffer.EmitStaZeroPage(zp);
+                }
             }
+        }
+
+        private byte AllocWordZeroPage(string name)
+        {
+            var addr = _nextZp;
+            _nextZp += 2; // word takes 2 bytes
+            if (_nextZp >= 0xFB) throw new InvalidOperationException("Out of zero page slots");
+            _locals[name] = addr;
+            _varTypes[name] = "word";
+            return addr;
         }
 
         private void EmitAssignment(AssignmentStmt assign)
         {
-            // Resolve target to a ZP address
+            // Resolve target
             byte zp;
+            string varName = "";
             if (assign.Target is IdentifierExpr ident)
             {
                 zp = GetLocal(ident.Name);
+                varName = ident.Name;
             }
             else if (assign.Target is MemberAccessExpr member && TryResolveStructField(member, out var fieldZp))
             {
@@ -538,6 +600,15 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             {
                 throw new InvalidOperationException("Unsupported assignment target");
             }
+
+            // Word (16-bit) assignment
+            if (varName != "" && IsWordVar(varName))
+            {
+                EmitWordAssignment(zp, assign.Op, assign.Value);
+                return;
+            }
+
+            // Byte (8-bit) assignment
             switch (assign.Op)
             {
                 case TokenKind.Equal:
@@ -625,7 +696,17 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 return;
             }
 
-            // Binary comparison
+            // 16-bit comparison: word var vs literal
+            if (condition is BinaryExpr wordBin &&
+                wordBin.Left is IdentifierExpr wordIdent &&
+                IsWordVar(wordIdent.Name) &&
+                wordBin.Right is IntLiteralExpr wordLit)
+            {
+                EmitWordComparisonBranchTrue(wordIdent.Name, wordBin.Op, (ushort)wordLit.Value, skipBytes);
+                return;
+            }
+
+            // 8-bit binary comparison
             if (condition is BinaryExpr bin)
             {
                 EmitExprToA(bin.Left);
@@ -706,6 +787,14 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 msgSend.Segments[0].Name == "poke" && msgSend.Segments[1].Name == "value")
             {
                 EmitPoke(msgSend.Segments[0].Argument!, msgSend.Segments[1].Argument!);
+                return;
+            }
+
+            // Built-in intrinsic: pokeScreen: wordOffset value: byteVal
+            if (msgSend.Receiver == null && msgSend.Segments.Count == 2 &&
+                msgSend.Segments[0].Name == "pokeScreen" && msgSend.Segments[1].Name == "value")
+            {
+                EmitPokeScreen(msgSend.Segments[0].Argument!, msgSend.Segments[1].Argument!);
                 return;
             }
 
@@ -887,6 +976,161 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 return true;
             }
             return false;
+        }
+
+        /// <summary>
+        /// Emits 16-bit comparison + branch-if-true over skipBytes.
+        /// Layout: comparison code (fixed size) + JMP-false (3 bytes).
+        /// If true, execution skips the JMP and falls into skipBytes territory.
+        /// </summary>
+        private void EmitWordComparisonBranchTrue(string varName, TokenKind op, ushort literal, int skipBytes)
+        {
+            var zp = GetLocal(varName);
+            var zpHi = (byte)(zp + 1);
+            var immLo = (byte)(literal & 0xFF);
+            var immHi = (byte)(literal >> 8);
+
+            // For Less (<): true if var < literal
+            // For Greater (>): true if var > literal
+            // For LessEqual (<=): true if var <= literal
+            // For GreaterEqual (>=): true if var >= literal
+            // For EqualEqual (==): true if var == literal
+            // For BangEqual (!=): true if var != literal
+
+            // Strategy: emit comparison code ending with a conditional structure where
+            // "true" falls through past a JMP, and "false" hits the JMP.
+            var falseLabel = NextLabel("wcmp_f");
+
+            // Layout: 14 bytes of comparison code, then caller emits JMP (3 bytes), then body.
+            // Branch offsets calculated from PC after each branch instruction:
+            //   Byte 0-1: LDA (2)    Byte 2-3: CMP (2)
+            //   Byte 4-5: Bxx (2)    Byte 6-7: BNE (2)
+            //   Byte 8-9: LDA (2)    Byte 10-11: CMP (2)
+            //   Byte 12-13: Bxx (2)
+            //   Byte 14-16: JMP end (3) ← emitted by caller
+            //   Byte 17: body starts
+            //
+            // From byte 4→6:  to body (17) = 11 = 8 + skipBytes ← "early true"
+            // From byte 6→8:  to JMP (14)  = 6                  ← "early false"
+            // From byte 12→14: to body (17) = 3 = skipBytes     ← "late true"
+            // Fall through at 14: hits JMP = false
+
+            switch (op)
+            {
+                case TokenKind.Less:
+                    Buffer.EmitLdaZeroPage(zpHi);
+                    Buffer.EmitCmpImmediate(immHi);
+                    Buffer.EmitBcc((sbyte)(8 + skipBytes)); // hi < litHi → TRUE
+                    Buffer.EmitBne(6);                      // hi > litHi → FALSE
+                    Buffer.EmitLdaZeroPage(zp);
+                    Buffer.EmitCmpImmediate(immLo);
+                    Buffer.EmitBcc((sbyte)skipBytes);        // lo < litLo → TRUE
+                    break;
+
+                case TokenKind.Greater:
+                    Buffer.EmitLdaImmediate(immHi);
+                    Buffer.EmitCmpZeroPage(zpHi);
+                    Buffer.EmitBcc((sbyte)(8 + skipBytes)); // litHi < varHi → TRUE
+                    Buffer.EmitBne(6);                      // litHi > varHi → FALSE
+                    Buffer.EmitLdaImmediate(immLo);
+                    Buffer.EmitCmpZeroPage(zp);
+                    Buffer.EmitBcc((sbyte)skipBytes);        // litLo < varLo → TRUE
+                    break;
+
+                case TokenKind.LessEqual:
+                    Buffer.EmitLdaZeroPage(zpHi);
+                    Buffer.EmitCmpImmediate(immHi);
+                    Buffer.EmitBcc((sbyte)(8 + skipBytes)); // hi < litHi → TRUE
+                    Buffer.EmitBne(6);                      // hi > litHi → FALSE
+                    Buffer.EmitLdaImmediate(immLo);
+                    Buffer.EmitCmpZeroPage(zp);
+                    Buffer.EmitBcs((sbyte)skipBytes);        // litLo >= varLo → TRUE
+                    break;
+
+                case TokenKind.GreaterEqual:
+                    Buffer.EmitLdaImmediate(immHi);
+                    Buffer.EmitCmpZeroPage(zpHi);
+                    Buffer.EmitBcc((sbyte)(8 + skipBytes)); // litHi < varHi → TRUE
+                    Buffer.EmitBne(6);                      // litHi > varHi → FALSE
+                    Buffer.EmitLdaZeroPage(zp);
+                    Buffer.EmitCmpImmediate(immLo);
+                    Buffer.EmitBcs((sbyte)skipBytes);        // varLo >= litLo → TRUE
+                    break;
+
+                default:
+                    throw new InvalidOperationException($"Unsupported word comparison: {op}");
+            }
+            // FALSE path: JMP is emitted by the caller after this method returns
+        }
+
+        private bool IsWordVar(string name) =>
+            _varTypes.TryGetValue(name, out var t) && t == "word";
+
+        private void EmitWordAssignment(byte zpLo, TokenKind op, ExprNode value)
+        {
+            var zpHi = (byte)(zpLo + 1);
+            if (op == TokenKind.Equal && value is IntLiteralExpr intLit)
+            {
+                var val = (ushort)intLit.Value;
+                Buffer.EmitLdaImmediate((byte)(val & 0xFF));
+                Buffer.EmitStaZeroPage(zpLo);
+                Buffer.EmitLdaImmediate((byte)(val >> 8));
+                Buffer.EmitStaZeroPage(zpHi);
+            }
+            else if (op == TokenKind.PlusEqual && value is IntLiteralExpr addLit)
+            {
+                var val = (ushort)addLit.Value;
+                Buffer.EmitLdaZeroPage(zpLo);
+                Buffer.EmitClc();
+                Buffer.EmitAdcImmediate((byte)(val & 0xFF));
+                Buffer.EmitStaZeroPage(zpLo);
+                Buffer.EmitLdaZeroPage(zpHi);
+                Buffer.EmitAdcImmediate((byte)(val >> 8));
+                Buffer.EmitStaZeroPage(zpHi);
+            }
+            else if (op == TokenKind.MinusEqual && value is IntLiteralExpr subLit)
+            {
+                var val = (ushort)subLit.Value;
+                Buffer.EmitLdaZeroPage(zpLo);
+                Buffer.EmitSec();
+                Buffer.EmitSbcImmediate((byte)(val & 0xFF));
+                Buffer.EmitStaZeroPage(zpLo);
+                Buffer.EmitLdaZeroPage(zpHi);
+                Buffer.EmitSbcImmediate((byte)(val >> 8));
+                Buffer.EmitStaZeroPage(zpHi);
+            }
+            else
+            {
+                throw new InvalidOperationException($"Unsupported word assignment: {op}");
+            }
+        }
+
+        /// <summary>
+        /// pokeScreen: wordOffset value: byteValue
+        /// Writes byteValue to $0400 + wordOffset using indirect indexed addressing.
+        /// </summary>
+        private void EmitPokeScreen(ExprNode offsetExpr, ExprNode valueExpr)
+        {
+            if (offsetExpr is IdentifierExpr ident && IsWordVar(ident.Name))
+            {
+                var zp = GetLocal(ident.Name);
+                // Calculate $0400 + word into ZP pointer
+                Buffer.EmitLdaZeroPage(zp);
+                Buffer.EmitClc();
+                Buffer.EmitAdcImmediate(0x00); // low byte of $0400
+                Buffer.EmitStaZeroPage(ZpPointerLo);
+                Buffer.EmitLdaZeroPage((byte)(zp + 1));
+                Buffer.EmitAdcImmediate(0x04); // high byte of $0400
+                Buffer.EmitStaZeroPage(ZpPointerHi);
+                // Store value via indirect indexed
+                EmitExprToA(valueExpr);
+                Buffer.EmitLdyImmediate(0);
+                Buffer.EmitStaIndirectY(ZpPointerLo);
+            }
+            else
+            {
+                throw new InvalidOperationException("pokeScreen offset must be a word variable");
+            }
         }
     }
 }

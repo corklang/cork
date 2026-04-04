@@ -1,0 +1,39 @@
+// Feature: word (16-bit) arithmetic
+// Full-screen movement with proper bounds
+
+clearScreen: {
+    byte i = 0;
+    while (i < 250) {
+        poke: 0x0400 + i value: 32;
+        poke: 0x04FA + i value: 32;
+        poke: 0x05F4 + i value: 32;
+        poke: 0x06EE + i value: 32;
+        i += 1;
+    }
+}
+
+entry scene Game {
+    hardware {
+        border: Color.darkGrey;
+        background: Color.black;
+    }
+
+    byte playerX = 20;
+    byte playerY = 12;
+    word playerPos = 500;
+
+    enter {
+        clearScreen:;
+    }
+
+    frame {
+        pokeScreen: playerPos value: 32;
+
+        if (joystick.port2.left)  { if (playerX > 0)  { playerX -= 1; playerPos -= 1; } }
+        if (joystick.port2.right) { if (playerX < 39) { playerX += 1; playerPos += 1; } }
+        if (joystick.port2.up)    { if (playerY > 0)  { playerY -= 1; playerPos -= 40; } }
+        if (joystick.port2.down)  { if (playerY < 24) { playerY += 1; playerPos += 40; } }
+
+        pokeScreen: playerPos value: 81;
+    }
+}
