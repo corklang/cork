@@ -11,8 +11,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 {
     public (byte[] Code, ushort EntryPoint) Generate(ProgramNode program)
     {
-        // Synthesize const arrays + pointer globals from inline sprite patterns
-        program = SynthesizeInlineSpriteData(program);
+        // Collect inline sprite patterns (separate from const data — aligned later)
+        var inlineSprites = CollectInlineSpritePatterns(program);
 
         // Collect const data
         var dataBytes = new List<byte>();
@@ -46,78 +46,52 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         // Collect global variables
         var globalVars = program.Declarations.OfType<GlobalVarDeclNode>().ToList();
 
-        // First pass: measure code size
-        var measuredSize = EmitAll(program, scenes, globalVars, dataNames, constArraySizes, codeBase, 0xFFFF).Length;
+        var constDataSize = dataBytes.Count;
 
-        // Second pass: emit with correct data addresses
+        // First pass: measure code size (sprite pointers registered as placeholder 0)
+        var measuredSize = EmitAll(program, scenes, globalVars, dataNames, constArraySizes,
+            inlineSprites, codeBase, 0xFFFF).Length;
+
+        // Second pass setup: compute data addresses
         var dataStart = (ushort)(codeBase + measuredSize);
         var dataAddresses = new Dictionary<string, ushort>();
         foreach (var (name, offset) in dataNames)
             dataAddresses[name] = (ushort)(dataStart + offset);
 
+        // Measure inline string data size (deterministic, same between passes)
+        var measureCtx = CreateContext(codeBase, dataAddresses);
+        RegisterAllTypes(measureCtx, program, globalVars, constArraySizes, inlineSprites);
+        EmitCode(measureCtx, program, scenes, globalVars, entryScene);
+        var measureInlineData = measureCtx.FinalizeInlineData(
+            (ushort)(codeBase + measureCtx.Buffer.Length + constDataSize));
+
+        // Compute aligned sprite positions (after code + const data + inline strings)
+        var spriteSegStart = (ushort)(codeBase + measuredSize + constDataSize + measureInlineData.Length);
+        var (spriteData, spritePointers) = BuildAlignedSpriteData(inlineSprites, spriteSegStart);
+
+        // Final pass: emit with real sprite pointer values
         var ctx = CreateContext(codeBase, dataAddresses);
+        RegisterAllTypes(ctx, program, globalVars, constArraySizes, inlineSprites);
+        foreach (var (dataName, _, _, _) in inlineSprites)
+        {
+            var ptrName = dataName.Replace("Data", "Ptr");
+            ctx.Symbols.AddConstantNoShadowCheck(ptrName, spritePointers[dataName]);
+        }
+        EmitCode(ctx, program, scenes, globalVars, entryScene);
 
-        // Register struct types and const array sizes
-        foreach (var decl in program.Declarations)
-            if (decl is StructDeclNode sd)
-                ctx.Symbols.RegisterStructType(sd);
-        foreach (var (name, size) in constArraySizes)
-            ctx.RegisterConstArraySize(name, size);
-        foreach (var decl in program.Declarations)
-            if (decl is EnumDeclNode ed)
-                ctx.Symbols.RegisterEnumType(ed);
-
-        // Allocate globals first (persist across scenes)
-        foreach (var gv in globalVars)
-            ctx.Symbols.AllocGlobal(gv.Name);
-        foreach (var decl in program.Declarations)
-            if (decl is GlobalMethodNode gm)
-                RegisterGlobalMethod(ctx, gm);
-
-        // Also register const-initialized globals as compile-time constants
-        // (so TryGetConstant finds them for sprite pointers etc.)
-        foreach (var gv in globalVars)
-            if (gv.Initializer is IntLiteralExpr constInit)
-                ctx.Symbols.AddConstantNoShadowCheck(gv.Name, constInit.Value);
-
-        // Emit SEI + global init
-        ctx.Buffer.EmitSei();
-        foreach (var gv in globalVars)
-            EmitGlobalInit(ctx, gv);
-
-        // Copy sprite data
-        ctx.Intrinsics.EmitSpriteCopies(program, dataAddresses);
-
-        // Jump to entry scene
-        ctx.Buffer.EmitJmpForward($"_scene_{entryScene.Name}");
-
-        // Emit all scenes
-        foreach (var scene in scenes)
-            ctx.Scenes.EmitScene(scene);
-
-        // Reset to global-only scope before emitting global methods
-        ctx.Symbols.ResetToGlobalScope();
-        var globalMethods = program.Declarations.OfType<GlobalMethodNode>().ToList();
-        foreach (var gm in globalMethods)
-            EmitGlobalMethod(ctx, gm);
-
-        // Runtime library
-        ctx.RuntimeLib.EmitRuntimeLibrary();
-
-        // Finalize inline data (string literals) — addresses resolved after code size is known
+        // Finalize inline data (string literals)
         var codeSize = ctx.Buffer.Length;
-        var constDataStart = (ushort)(codeBase + codeSize);
-        var inlineDataStart = (ushort)(constDataStart + dataBytes.Count);
+        var inlineDataStart = (ushort)(codeBase + codeSize + constDataSize);
         var inlineData = ctx.FinalizeInlineData(inlineDataStart);
-
         ctx.Buffer.ResolveFixups();
 
-        // Combine code + const data + inline data
+        // Combine code + const data + inline data + aligned sprite data
         var code = ctx.Buffer.ToArray();
-        var result = new byte[code.Length + dataBytes.Count + inlineData.Length];
+        var result = new byte[code.Length + constDataSize + inlineData.Length + spriteData.Length];
         code.CopyTo(result, 0);
         dataBytes.CopyTo(result.AsSpan()[code.Length..]);
-        inlineData.CopyTo(result, code.Length + dataBytes.Count);
+        inlineData.CopyTo(result, code.Length + constDataSize);
+        spriteData.CopyTo(result, code.Length + constDataSize + inlineData.Length);
         return (result, codeBase);
     }
 
@@ -133,16 +107,10 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         return ctx;
     }
 
-    private static byte[] EmitAll(ProgramNode program, List<SceneNode> scenes,
-        List<GlobalVarDeclNode> globalVars, Dictionary<string, int> dataNames,
-        Dictionary<string, int> constArraySizes,
-        ushort codeBase, ushort dataStart)
+    private static void RegisterAllTypes(EmitContext ctx, ProgramNode program,
+        List<GlobalVarDeclNode> globalVars, Dictionary<string, int> constArraySizes,
+        List<(string DataName, string SceneName, string SpriteName, byte[] Bytes)> inlineSprites)
     {
-        var dataAddresses = new Dictionary<string, ushort>();
-        foreach (var (name, offset) in dataNames)
-            dataAddresses[name] = (ushort)(dataStart + offset);
-
-        var ctx = CreateContext(codeBase, dataAddresses);
         foreach (var decl in program.Declarations)
             if (decl is StructDeclNode sd)
                 ctx.Symbols.RegisterStructType(sd);
@@ -154,28 +122,56 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         foreach (var gv in globalVars)
             ctx.Symbols.AllocGlobal(gv.Name);
         foreach (var decl in program.Declarations)
-            if (decl is GlobalMethodNode gm2)
-                RegisterGlobalMethod(ctx, gm2);
-
-        // Register const-initialized globals as compile-time constants (must match Generate pass)
+            if (decl is GlobalMethodNode gm)
+                RegisterGlobalMethod(ctx, gm);
         foreach (var gv in globalVars)
             if (gv.Initializer is IntLiteralExpr constInit)
                 ctx.Symbols.AddConstantNoShadowCheck(gv.Name, constInit.Value);
 
+        // Register placeholder pointer constants for inline sprites (value 0 — code size unaffected)
+        foreach (var (dataName, _, _, _) in inlineSprites)
+        {
+            var ptrName = dataName.Replace("Data", "Ptr");
+            if (!ctx.Symbols.TryGetConstant(ptrName, out _))
+                ctx.Symbols.AddConstantNoShadowCheck(ptrName, 0);
+        }
+    }
+
+    private static void EmitCode(EmitContext ctx, ProgramNode program,
+        List<SceneNode> scenes, List<GlobalVarDeclNode> globalVars, SceneNode entryScene)
+    {
         ctx.Buffer.EmitSei();
         foreach (var gv in globalVars)
             EmitGlobalInit(ctx, gv);
-        ctx.Intrinsics.EmitSpriteCopies(program, dataAddresses);
-        ctx.Buffer.EmitJmpForward($"_scene_{scenes.First(s => s.IsEntry).Name}");
+        ctx.Intrinsics.EmitSpriteCopies(program, ctx.DataAddresses);
+        ctx.Buffer.EmitJmpForward($"_scene_{entryScene.Name}");
 
         foreach (var scene in scenes)
             ctx.Scenes.EmitScene(scene);
 
+        ctx.Symbols.ResetToGlobalScope();
         foreach (var decl in program.Declarations)
             if (decl is GlobalMethodNode gm)
                 EmitGlobalMethod(ctx, gm);
 
         ctx.RuntimeLib.EmitRuntimeLibrary();
+    }
+
+    private static byte[] EmitAll(ProgramNode program, List<SceneNode> scenes,
+        List<GlobalVarDeclNode> globalVars, Dictionary<string, int> dataNames,
+        Dictionary<string, int> constArraySizes,
+        List<(string DataName, string SceneName, string SpriteName, byte[] Bytes)> inlineSprites,
+        ushort codeBase, ushort dataStart)
+    {
+        var dataAddresses = new Dictionary<string, ushort>();
+        foreach (var (name, offset) in dataNames)
+            dataAddresses[name] = (ushort)(dataStart + offset);
+
+        var ctx = CreateContext(codeBase, dataAddresses);
+        RegisterAllTypes(ctx, program, globalVars, constArraySizes, inlineSprites);
+
+        var entryScene = scenes.First(s => s.IsEntry);
+        EmitCode(ctx, program, scenes, globalVars, entryScene);
         return ctx.Buffer.ToArray();
     }
 
@@ -228,14 +224,13 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
     }
 
     /// <summary>
-    /// Synthesize ConstArrayDeclNode + GlobalVarDeclNode for each inline sprite pattern,
-    /// so the existing data collection and sprite copy pipeline handles them.
+    /// Collect inline sprite patterns from sprite blocks. Returns (dataName, bytes) pairs.
+    /// Does NOT synthesize pointer globals — pointers are computed from aligned addresses.
     /// </summary>
-    private static ProgramNode SynthesizeInlineSpriteData(ProgramNode program)
+    private static List<(string DataName, string SceneName, string SpriteName, byte[] Bytes)>
+        CollectInlineSpritePatterns(ProgramNode program)
     {
-        var syntheticDecls = new List<TopLevelNode>();
-        var nextPtr = 13;
-
+        var results = new List<(string, string, string, byte[])>();
         foreach (var scene in program.Declarations.OfType<SceneNode>())
         {
             foreach (var sprite in scene.Members.OfType<SpriteBlockNode>())
@@ -250,23 +245,42 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
                 var bytes = SpritePatternCompiler.Compile(pattern.Pattern, isMulticolor);
                 var dataName = $"_sprite_{scene.Name}_{sprite.Name}Data";
-                var ptrName = $"_sprite_{scene.Name}_{sprite.Name}Ptr";
-                var loc = pattern.Location;
-
-                syntheticDecls.Add(new ConstArrayDeclNode(
-                    "byte", 63, dataName,
-                    bytes.Select(b => (ExprNode)new IntLiteralExpr(b, loc)).ToList(),
-                    loc));
-
-                syntheticDecls.Add(new GlobalVarDeclNode(
-                    "byte", ptrName,
-                    new IntLiteralExpr(nextPtr++, loc),
-                    loc));
+                results.Add((dataName, scene.Name, sprite.Name, bytes));
             }
         }
+        return results;
+    }
 
-        if (syntheticDecls.Count == 0) return program;
-        return program with { Declarations = [..syntheticDecls, ..program.Declarations] };
+    /// <summary>
+    /// Build the sprite data segment with 64-byte alignment padding.
+    /// Returns the raw bytes and a map of dataName → (offset, pointerValue).
+    /// </summary>
+    private static (byte[] Data, Dictionary<string, int> Pointers) BuildAlignedSpriteData(
+        List<(string DataName, string SceneName, string SpriteName, byte[] Bytes)> sprites,
+        ushort segmentStart)
+    {
+        if (sprites.Count == 0)
+            return ([], []);
+
+        var data = new List<byte>();
+        var pointers = new Dictionary<string, int>();
+
+        foreach (var (dataName, _, _, bytes) in sprites)
+        {
+            // Pad to next 64-byte boundary
+            var currentAddr = segmentStart + data.Count;
+            var aligned = (currentAddr + 63) & ~63;
+            var padding = aligned - currentAddr;
+            for (var i = 0; i < padding; i++)
+                data.Add(0);
+
+            pointers[dataName] = aligned / 64;
+            data.AddRange(bytes);
+            // Pad to full 64 bytes (sprite data is 63, VIC-II reads 64)
+            data.Add(0);
+        }
+
+        return (data.ToArray(), pointers);
     }
 
     /// <summary>
