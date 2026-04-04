@@ -1034,29 +1034,25 @@ Cork uses keyword modifiers for variant behavior. This is a consistent pattern t
 
 ---
 
-## Designed But Not Yet Implemented
-
-These features are specified in the language design and grammar but not yet in the compiler:
+## Not Yet Implemented
 
 | Feature | Notes |
 |---------|-------|
-| `as` type casting | `big as byte`, `speed as fixed` — token and grammar exist |
-| `for (x in array)` | For-each iteration — token exists |
-| Struct initializer syntax | `Enemy { x = 10, y = 20 }` — in grammar |
-| `return` with value | Methods returning computed values |
-| `string` type | Fixed-size PETSCII strings |
-| `import "file.cork"` | Multi-file programs |
-| Struct composition | Structs containing other structs |
-| Sprite declarations | `sprite name { ... }` declarative blocks in scenes |
-| Scene-local resource imports | `charset font = import("font.bin")` inside scenes |
+| SID audio | Music playback and sound effects — biggest missing feature |
+| Keyboard input | Reading the keyboard matrix |
+| Custom charsets | Loading character set data |
+| `import("file.bin")` | Binary data import expression |
 | D64 / CRT output | Disk image and cartridge generation |
+| Sprite multiplexing | Showing more than 8 sprites via raster tricks |
+| Smooth scrolling | Hardware scroll via $D011/$D016 fine scroll bits |
+| Standard library | Math, screen, print, random utilities (DCE is ready) |
+| `fallthrough switch` | C-style fallthrough (keyword exists, not wired) |
+| Peephole optimizer | Redundant LDA/STA elimination, branch shortening |
 
-## Open Questions for Future Discussion
+## Open Questions
 
-1. **Error handling for I/O** — Scene loading can fail (disk error). How should this surface? A built-in retry/error screen? A callback?
-2. **Debugging support** — Source-level debugging in VICE? Source maps?
-3. **Standard library scope** — What math, string, and utility functions ship built-in?
-4. **Build system** — CLI tool? Project file format? Watch mode?
-5. **Advanced graphics modes** — How do bitmap mode, FLI, sprite multiplexing surface in the language?
-6. **Optimization hints** — Can the developer annotate hot paths or suggest memory placement?
-7. **Library system** — How are libraries authored, versioned, and distributed?
+1. **Standard library scope** — What math, string, screen, and utility functions ship built-in?
+2. **Build system** — CLI tool? Project file format? Watch mode?
+3. **Library distribution** — How are libraries authored, versioned, and shared?
+4. **Debugging support** — Source-level debugging in VICE? Source maps?
+5. **Error reporting** — Better error messages with source locations throughout codegen
