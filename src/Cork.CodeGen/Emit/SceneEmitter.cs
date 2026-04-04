@@ -95,17 +95,60 @@ public sealed class SceneEmitter(EmitContext ctx)
     {
         foreach (var setting in hw.Settings)
         {
+            if (setting.Name == "mode")
+            {
+                EmitGraphicsMode(setting);
+                continue;
+            }
+
             var value = ctx.Expressions.EvalConstExpr(setting.Value);
             var addr = setting.Name switch
             {
                 "border" => (ushort)0xD020,
                 "background" => (ushort)0xD021,
+                "background1" => (ushort)0xD022,
+                "background2" => (ushort)0xD023,
+                "background3" => (ushort)0xD024,
                 "multicolor0" => (ushort)0xD025,
                 "multicolor1" => (ushort)0xD026,
                 _ => throw new InvalidOperationException($"Unknown hardware setting: {setting.Name}")
             };
             ctx.Buffer.EmitLdaImmediate(value);
             ctx.Buffer.EmitStaAbsolute(addr);
+        }
+    }
+
+    /// <summary>
+    /// Set VIC-II graphics mode via $D011 (bits 6,5) and $D016 (bit 4).
+    /// Bitmap modes also set $D018 bit 3 for bitmap base at $2000.
+    /// </summary>
+    private void EmitGraphicsMode(HardwareSetting setting)
+    {
+        if (setting.Value is not IdentifierExpr modeIdent)
+            throw new InvalidOperationException("mode: value must be an identifier");
+
+        // $D011: base $1B (DEN=1, RSEL=1, YSCROLL=3), modify bits 5-6
+        // $D016: base $08 (CSEL=1, XSCROLL=0), modify bit 4
+        var (d011, d016, d018) = modeIdent.Name switch
+        {
+            "text"             => ((byte)0x1B, (byte)0x08, (byte?)null),
+            "multicolorText"   => ((byte)0x1B, (byte)0x18, (byte?)null),
+            "bitmap"           => ((byte)0x3B, (byte)0x08, (byte?)0x1D),
+            "multicolorBitmap" => ((byte)0x3B, (byte)0x18, (byte?)0x1D),
+            "ecm"              => ((byte)0x5B, (byte)0x08, (byte?)null),
+            _ => throw new InvalidOperationException(
+                $"Unknown graphics mode: {modeIdent.Name}. " +
+                "Valid modes: text, multicolorText, bitmap, multicolorBitmap, ecm")
+        };
+
+        ctx.Buffer.EmitLdaImmediate(d011);
+        ctx.Buffer.EmitStaAbsolute(0xD011);
+        ctx.Buffer.EmitLdaImmediate(d016);
+        ctx.Buffer.EmitStaAbsolute(0xD016);
+        if (d018.HasValue)
+        {
+            ctx.Buffer.EmitLdaImmediate(d018.Value);
+            ctx.Buffer.EmitStaAbsolute(0xD018);
         }
     }
 

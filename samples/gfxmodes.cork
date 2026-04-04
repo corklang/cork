@@ -1,0 +1,179 @@
+// Feature: all 5 VIC-II graphics modes, cycle with joystick fire
+
+// --- Mode 1: Standard text (default) ---
+entry scene TextMode {
+    hardware {
+        mode: text;
+        border: Color.blue;
+        background: Color.blue;
+    }
+
+    enter {
+        // Fill screen with characters
+        byte i = 0;
+        while (i < 250) {
+            poke: (0x0400 + i) value: i;
+            poke: (0x04FA + i) value: i;
+            i += 1;
+        }
+        // Fill color RAM
+        i = 0;
+        while (i < 250) {
+            poke: (0xD800 + i) value: 14;
+            poke: (0xD8FA + i) value: 14;
+            i += 1;
+        }
+        printAt: 12 * 40 + 11 text: "STANDARD TEXT";
+    }
+
+    frame {
+        if (joystick.port2.fire) { go McTextMode; }
+    }
+}
+
+// --- Mode 2: Multicolor text ---
+scene McTextMode {
+    hardware {
+        mode: multicolorText;
+        border: Color.black;
+        background: Color.black;
+        background1: Color.red;
+        background2: Color.green;
+    }
+
+    enter {
+        byte i = 0;
+        while (i < 250) {
+            poke: (0x0400 + i) value: i;
+            poke: (0x04FA + i) value: i;
+            // Color RAM bit 3 enables multicolor per char
+            poke: (0xD800 + i) value: 0x0F;
+            poke: (0xD8FA + i) value: 0x0B;
+            i += 1;
+        }
+        printAt: 12 * 40 + 9 text: "MULTICOLOR TEXT";
+    }
+
+    frame {
+        if (joystick.port2.fire) { go BitmapMode; }
+    }
+}
+
+// --- Mode 3: Standard bitmap (320x200, 2 colors per 8x8 cell) ---
+scene BitmapMode {
+    hardware {
+        mode: bitmap;
+        border: Color.darkGrey;
+        background: Color.black;
+    }
+
+    enter {
+        // Fill bitmap at $2000 with stripe pattern
+        word addr = 0x2000;
+        while (addr < 0x3F40) {
+            poke: addr value: 0xAA;
+            addr += 1;
+            poke: addr value: 0x55;
+            addr += 1;
+        }
+        // Screen RAM = color info: high nybble = fg, low nybble = bg per cell
+        byte i = 0;
+        while (i < 250) {
+            poke: (0x0400 + i) value: 0x6E;
+            poke: (0x04FA + i) value: 0xE6;
+            i += 1;
+        }
+    }
+
+    frame {
+        if (joystick.port2.fire) { go McBitmapMode; }
+    }
+}
+
+// --- Mode 4: Multicolor bitmap (160x200, 4 colors per 4x8 cell) ---
+scene McBitmapMode {
+    hardware {
+        mode: multicolorBitmap;
+        border: Color.black;
+        background: Color.blue;
+    }
+
+    enter {
+        // Fill bitmap at $2000 with multicolor pattern
+        word addr = 0x2000;
+        while (addr < 0x3F40) {
+            poke: addr value: 0x6B;
+            addr += 1;
+            poke: addr value: 0xD8;
+            addr += 1;
+        }
+        // Screen RAM: high nybble = color 1, low nybble = color 2
+        byte i = 0;
+        while (i < 250) {
+            poke: (0x0400 + i) value: 0x27;
+            poke: (0x04FA + i) value: 0x53;
+            i += 1;
+        }
+        // Color RAM = color 3 per cell
+        i = 0;
+        while (i < 250) {
+            poke: (0xD800 + i) value: 1;
+            poke: (0xD8FA + i) value: 5;
+            i += 1;
+        }
+    }
+
+    frame {
+        if (joystick.port2.fire) { go EcmMode; }
+    }
+}
+
+// --- Mode 5: Extended Color Mode (4 background colors, 64 chars) ---
+scene EcmMode {
+    hardware {
+        mode: ecm;
+        border: Color.black;
+        background: Color.blue;
+        background1: Color.red;
+        background2: Color.green;
+        background3: Color.yellow;
+    }
+
+    enter {
+        // Char code bits 6-7 select which background (0-3)
+        // Fill screen with bg0 chars + white foreground
+        byte i = 0;
+        while (i < 250) {
+            poke: (0x0400 + i) value: 0x01;
+            poke: (0x04FA + i) value: 0x01;
+            poke: (0xD800 + i) value: 1;
+            poke: (0xD8FA + i) value: 1;
+            i += 1;
+        }
+        // Rows 6-7: bg1 (red) — char code 0x41
+        i = 0;
+        while (i < 40) {
+            poke: (0x04F0 + i) value: 0x41;
+            poke: (0x0518 + i) value: 0x41;
+            i += 1;
+        }
+        // Rows 12-13: bg2 (green) — char code 0x81
+        i = 0;
+        while (i < 40) {
+            poke: (0x05E0 + i) value: 0x81;
+            poke: (0x0608 + i) value: 0x81;
+            i += 1;
+        }
+        // Rows 18-19: bg3 (yellow) — char code 0xC1
+        i = 0;
+        while (i < 40) {
+            poke: (0x06D0 + i) value: 0xC1;
+            poke: (0x06F8 + i) value: 0xC1;
+            i += 1;
+        }
+    }
+
+    frame {
+        if (joystick.port2.fire) { go TextMode; }
+    }
+}
