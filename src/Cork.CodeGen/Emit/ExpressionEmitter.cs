@@ -61,16 +61,8 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                     ctx.Buffer.EmitLdaZeroPage(ctx.Symbols.GetLocal(ident.Name));
                 break;
 
-            case BinaryExpr { Op: TokenKind.Plus } bin:
-                EmitExprToA(bin.Left);
-                ctx.Buffer.EmitClc();
-                EmitAdcValue(bin.Right);
-                break;
-
-            case BinaryExpr { Op: TokenKind.Minus } bin:
-                EmitExprToA(bin.Left);
-                ctx.Buffer.EmitSec();
-                EmitSbcValue(bin.Right);
+            case BinaryExpr bin:
+                EmitBinaryExpr(bin);
                 break;
 
             // String/array ref param indexing: text[i] → LDA ($FB),Y via pointer
@@ -170,6 +162,77 @@ public sealed class ExpressionEmitter(EmitContext ctx)
         }
     }
 
+    private void EmitBinaryExpr(BinaryExpr bin)
+    {
+        switch (bin.Op)
+        {
+            case TokenKind.Plus:
+                EmitExprToA(bin.Left);
+                ctx.Buffer.EmitClc();
+                EmitAdcValue(bin.Right);
+                break;
+            case TokenKind.Minus:
+                EmitExprToA(bin.Left);
+                ctx.Buffer.EmitSec();
+                EmitSbcValue(bin.Right);
+                break;
+            case TokenKind.Ampersand:
+                EmitExprToA(bin.Left);
+                EmitBitwiseOp(0x29, 0x25, bin.Right); // AND #imm / AND zp
+                break;
+            case TokenKind.Pipe:
+                EmitExprToA(bin.Left);
+                EmitBitwiseOp(0x09, 0x05, bin.Right); // ORA #imm / ORA zp
+                break;
+            case TokenKind.Caret:
+                EmitExprToA(bin.Left);
+                EmitBitwiseOp(0x49, 0x45, bin.Right); // EOR #imm / EOR zp
+                break;
+            case TokenKind.ShiftLeft:
+                EmitExprToA(bin.Left);
+                if (TryFoldConstant(bin.Right, out var shlCount))
+                    for (var i = 0; i < shlCount; i++)
+                        ctx.Buffer.EmitByte(0x0A); // ASL A
+                else
+                    throw new InvalidOperationException("Shift count must be constant");
+                break;
+            case TokenKind.ShiftRight:
+                EmitExprToA(bin.Left);
+                if (TryFoldConstant(bin.Right, out var shrCount))
+                    for (var i = 0; i < shrCount; i++)
+                        ctx.Buffer.EmitByte(0x4A); // LSR A
+                else
+                    throw new InvalidOperationException("Shift count must be constant");
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported binary operator in expression: {bin.Op}");
+        }
+    }
+
+    private void EmitBitwiseOp(byte immOpcode, byte zpOpcode, ExprNode operand)
+    {
+        if (TryFoldConstant(operand, out var constVal))
+        {
+            ctx.Buffer.EmitByte(immOpcode);
+            ctx.Buffer.EmitByte((byte)constVal);
+        }
+        else if (operand is IdentifierExpr ident && !ctx.Symbols.IsWordVar(ident.Name))
+        {
+            ctx.Buffer.EmitByte(zpOpcode);
+            ctx.Buffer.EmitByte(ctx.Symbols.GetLocal(ident.Name));
+        }
+        else
+        {
+            // Complex operand: evaluate to temp, apply op
+            ctx.Buffer.EmitPha();
+            EmitExprToA(operand);
+            ctx.Buffer.EmitStaZeroPage(0x0F);
+            ctx.Buffer.EmitPla();
+            ctx.Buffer.EmitByte(zpOpcode);
+            ctx.Buffer.EmitByte(0x0F);
+        }
+    }
+
     public void EmitAdcValue(ExprNode expr)
     {
         switch (expr)
@@ -194,7 +257,14 @@ public sealed class ExpressionEmitter(EmitContext ctx)
         {
             case IntLiteralExpr intLit: ctx.Buffer.EmitSbcImmediate((byte)intLit.Value); break;
             case IdentifierExpr ident: ctx.Buffer.EmitSbcZeroPage(ctx.Symbols.GetLocal(ident.Name)); break;
-            default: throw new InvalidOperationException("Phase 1: SBC operand must be simple");
+            default:
+                // Complex operand: save A, evaluate operand, store to temp, restore A, SBC temp
+                ctx.Buffer.EmitPha();
+                EmitExprToA(expr);
+                ctx.Buffer.EmitStaZeroPage(0x0F);
+                ctx.Buffer.EmitPla();
+                ctx.Buffer.EmitSbcZeroPage(0x0F);
+                break;
         }
     }
 

@@ -150,6 +150,22 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
 
     public void EmitPoke(ExprNode addressExpr, ExprNode valueExpr)
     {
+        // Try to fold the entire address to a constant first
+        if (ctx.Expressions.TryFoldConstant(addressExpr, out var foldedAddr))
+            addressExpr = new IntLiteralExpr(foldedAddr, addressExpr.Location);
+
+        // For binary add, try to fold the left side to a constant base
+        if (addressExpr is BinaryExpr { Op: Language.Lexing.TokenKind.Plus } preAdd &&
+            preAdd.Left is not IntLiteralExpr &&
+            ctx.Expressions.TryFoldConstant(preAdd.Left, out var foldedBase))
+        {
+            addressExpr = new BinaryExpr(
+                new IntLiteralExpr(foldedBase, preAdd.Left.Location),
+                Language.Lexing.TokenKind.Plus,
+                preAdd.Right,
+                preAdd.Location);
+        }
+
         if (addressExpr is BinaryExpr { Op: Language.Lexing.TokenKind.Plus } addExpr &&
             addExpr.Left is IntLiteralExpr baseAddr)
         {
