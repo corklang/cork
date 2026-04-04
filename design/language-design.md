@@ -107,14 +107,26 @@ const MAX_ENEMIES = 8;         // inferred
 
 ### Strings
 
-Strings are fixed-size. The size is determined at declaration — either from an explicit size or inferred from the initial value.
+Strings are fixed-size, stored as C64 screen codes. The size is determined at declaration — either from an explicit size or inferred from the initial value.
 
 ```cork
 string name = "HELLO";         // fixed at 5 bytes, inferred from literal
 string[20] buffer = "HI";      // fixed at 20 bytes, padded with spaces
+printAt: 100 text: "SCORE: 0"; // string literals work directly in printAt
+printAt: 200 text: name;       // string variables too
 ```
 
-Strings store PETSCII data inline (not as a pointer). A `string[20]` is exactly 20 bytes in memory. Strings cannot grow or shrink at runtime.
+String literals in Cork source are automatically converted to C64 screen codes at compile time. The compiler handles the ASCII→screen code mapping.
+
+**Supported characters in string literals:**
+- Letters: `A`-`Z`, `a`-`z` (both map to uppercase, C64 has no lowercase in default charset)
+- Digits: `0`-`9`
+- Space
+- Punctuation: `!` `"` `#` `$` `%` `&` `'` `(` `)` `*` `+` `,` `-` `.` `/` `:` `;` `<` `=` `>` `?` `@` `[` `]` `^` `_`
+
+Unsupported characters (like `{`, `}`, `~`, `|`, non-ASCII) produce a compile error with a clear message.
+
+Strings are stored inline in zero-page memory. They cannot grow or shrink at runtime.
 
 ### No Null
 

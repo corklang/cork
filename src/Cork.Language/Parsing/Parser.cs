@@ -316,8 +316,10 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
             return ParseSceneVarDecl();
         }
 
-        // Scene-local variable: type name [= expr]; (primitive or struct type)
+        // Scene-local variable: type name [= expr]; or type[N] name;
         if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && !PeekIs(2, TokenKind.Colon))
+            return ParseSceneVarDecl();
+        if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.OpenBracket))
             return ParseSceneVarDecl();
         // Struct-typed variable: StructName varName; or StructName[N] varName;
         if (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Identifier) && !PeekIs(2, TokenKind.Colon))

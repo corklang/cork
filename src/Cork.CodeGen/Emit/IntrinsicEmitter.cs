@@ -140,15 +140,41 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             dataAddr = strAddr;
             arraySize = strLit.Value.Length;
         }
-        else if (textExpr is IdentifierExpr textIdent &&
-                 ctx.DataAddresses.TryGetValue(textIdent.Name, out var addr))
+        else if (textExpr is IdentifierExpr textIdent)
         {
-            dataAddr = addr;
-            arraySize = ctx.GetConstArraySize(textIdent.Name);
+            // Check string variable first
+            if (ctx.Symbols.TryGetStringVar(textIdent.Name, out var strInfo))
+            {
+                // String variable: loop over ZP bytes
+                long strPos = 0;
+                if (posExpr is IntLiteralExpr pl) strPos = pl.Value;
+                else if (ctx.Expressions.TryFoldConstant(posExpr, out var fp)) strPos = fp;
+
+                var sa = (ushort)(0x0400 + strPos);
+                ctx.Buffer.EmitLdxImmediate(0);
+                // LDA zp,X = $B5 zp (2 bytes)
+                ctx.Buffer.EmitByte(0xB5); ctx.Buffer.EmitByte(strInfo.ZpBase);
+                ctx.Buffer.EmitStaAbsoluteX(sa);
+                ctx.Buffer.EmitInx();
+                ctx.Buffer.EmitCpxImmediate((byte)strInfo.Length);
+                // Loop: LDA zp,X(2) + STA abs,X(3) + INX(1) + CPX(2) + BNE(2) = 10
+                ctx.Buffer.EmitBne(unchecked((sbyte)(-10)));
+                return;
+            }
+            // Const array
+            if (ctx.DataAddresses.TryGetValue(textIdent.Name, out var addr2))
+            {
+                dataAddr = addr2;
+                arraySize = ctx.GetConstArraySize(textIdent.Name);
+            }
+            else
+            {
+                throw new InvalidOperationException($"Unknown string or array: {textIdent.Name}");
+            }
         }
         else
         {
-            throw new InvalidOperationException("printAt text must be a string literal or const array name");
+            throw new InvalidOperationException("printAt text must be a string literal, variable, or const array");
         }
 
         // Calculate screen address: $0400 + pos

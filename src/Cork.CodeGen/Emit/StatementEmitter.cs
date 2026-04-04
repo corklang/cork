@@ -137,6 +137,12 @@ public sealed class StatementEmitter(EmitContext ctx)
         {
             zp = (byte)(fieldBase + (int)idxLit.Value);
         }
+        // String indexed assignment: score[8] = 49;
+        else if (assign.Target is IndexExpr { Receiver: IdentifierExpr strIdent, Index: IntLiteralExpr strIdx } &&
+                 ctx.Symbols.TryGetStringVar(strIdent.Name, out var strInfo))
+        {
+            zp = (byte)(strInfo.ZpBase + (int)strIdx.Value);
+        }
         else
         {
             throw new InvalidOperationException("Unsupported assignment target");

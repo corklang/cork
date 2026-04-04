@@ -111,6 +111,26 @@ public sealed class SceneEmitter(EmitContext ctx)
             return;
         }
 
+        // String variable: string name = "HELLO"; or string[20] name = "HI";
+        if (decl.TypeName == "string")
+        {
+            var strValue = decl.Initializer is StringLiteralExpr strLit ? strLit.Value : "";
+            var screenCodes = ScreenCodes.FromString(strValue);
+            var length = decl.ArraySize > 0 ? decl.ArraySize : screenCodes.Length;
+
+            var zpBase = ctx.Symbols.AllocArrayZeroPage(decl.Name, length);
+            ctx.Symbols.RegisterStringVar(decl.Name, zpBase, length);
+
+            // Initialize: copy screen codes, pad with spaces if needed
+            for (var i = 0; i < length; i++)
+            {
+                var val = i < screenCodes.Length ? screenCodes[i] : (byte)32; // space padding
+                ctx.Buffer.EmitLdaImmediate(val);
+                ctx.Buffer.EmitStaZeroPage((byte)(zpBase + i));
+            }
+            return;
+        }
+
         if (ctx.Symbols.TryGetStructType(decl.TypeName, out var structType))
         {
             if (decl.ArraySize > 0)

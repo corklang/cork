@@ -20,6 +20,8 @@ public sealed class SymbolTable
     private readonly Dictionary<string, (string StructType, Dictionary<string, byte> FieldBases, int Size)> _structArrays = [];
     private readonly HashSet<string> _emittedStructMethods = [];
     private readonly Dictionary<string, List<MethodParameter>> _methodParams = [];
+    // String variables: name → (zpBase, length)
+    private readonly Dictionary<string, (byte ZpBase, int Length)> _stringVars = [];
 
     private byte _nextZp = 0x02;
     private byte _globalZpEnd = 0x02;
@@ -123,6 +125,16 @@ public sealed class SymbolTable
         _nextZp = _globalZpEnd;
     }
 
+    public void RegisterStringVar(string name, byte zpBase, int length)
+    {
+        _stringVars[name] = (zpBase, length);
+    }
+
+    public bool TryGetStringVar(string name, out (byte ZpBase, int Length) info)
+    {
+        return _stringVars.TryGetValue(name, out info);
+    }
+
     public void ResetForScene()
     {
         _locals.Clear();
@@ -130,6 +142,7 @@ public sealed class SymbolTable
         _constants.Clear();
         _structInstances.Clear();
         _structArrays.Clear();
+        _stringVars.Clear();
         _emittedStructMethods.Clear();
         foreach (var (name, zp) in _globals)
             _locals[name] = zp;

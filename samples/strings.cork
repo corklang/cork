@@ -1,4 +1,4 @@
-// Feature: real string support with auto screen code conversion
+// Feature: full string support — literals, variables, printAt
 
 entry scene Demo {
     hardware {
@@ -6,19 +6,24 @@ entry scene Demo {
         background: Color.black;
     }
 
-    enter {
-        // String literals auto-convert to C64 screen codes
-        printAt: 175 text: "HELLO CORK!";
-        printAt: 255 text: "A C64 LANGUAGE";
-        printAt: 375 text: "PRESS FIRE TO START";
+    string title = "HELLO CORK!";
+    string[20] score = "SCORE: 0000";
 
-        // Numbers and punctuation work too
-        printAt: 455 text: "SCORE: 0000";
+    enter {
+        // Print string variables
+        printAt: 175 text: title;
+        printAt: 855 text: score;
+
+        // Print string literals directly
+        printAt: 295 text: "A C64 LANGUAGE";
         printAt: 935 text: "(C) 2026";
     }
 
     frame {
         if (joystick.port2.fire) {
+            // Modify the score string
+            score[8] = 49;   // '1' = screen code 49
+            printAt: 855 text: score;
             poke: 0xD020 value: 5;
         }
     }
