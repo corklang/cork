@@ -47,7 +47,7 @@ public class ExpressionEmitterTests
     }
 
     [Test]
-    public async Task EmitExprToA_binary_add_emits_LDA_CLC_ADC()
+    public async Task EmitExprToA_binary_add_constant_folds()
     {
         var (ctx, expr) = CreateEmitter();
         var addExpr = new BinaryExpr(
@@ -60,17 +60,14 @@ public class ExpressionEmitterTests
         expr.EmitExprToA(addExpr);
 
         var bytes = ctx.Buffer.ToArray();
-        // LDA #10 (2) + CLC (1) + ADC #20 (2) = 5 bytes
-        await Assert.That(bytes).Count().IsEqualTo(5);
+        // Constant-folded: LDA #30
+        await Assert.That(bytes).Count().IsEqualTo(2);
         await Assert.That(bytes[0]).IsEqualTo((byte)0xA9); // LDA #
-        await Assert.That(bytes[1]).IsEqualTo((byte)10);
-        await Assert.That(bytes[2]).IsEqualTo((byte)0x18); // CLC
-        await Assert.That(bytes[3]).IsEqualTo((byte)0x69); // ADC #
-        await Assert.That(bytes[4]).IsEqualTo((byte)20);
+        await Assert.That(bytes[1]).IsEqualTo((byte)30);
     }
 
     [Test]
-    public async Task EmitExprToA_binary_sub_emits_LDA_SEC_SBC()
+    public async Task EmitExprToA_binary_sub_constant_folds()
     {
         var (ctx, expr) = CreateEmitter();
         var subExpr = new BinaryExpr(
@@ -83,13 +80,10 @@ public class ExpressionEmitterTests
         expr.EmitExprToA(subExpr);
 
         var bytes = ctx.Buffer.ToArray();
-        // LDA #50 (2) + SEC (1) + SBC #30 (2) = 5 bytes
-        await Assert.That(bytes).Count().IsEqualTo(5);
-        await Assert.That(bytes[0]).IsEqualTo((byte)0xA9);
-        await Assert.That(bytes[1]).IsEqualTo((byte)50);
-        await Assert.That(bytes[2]).IsEqualTo((byte)0x38); // SEC
-        await Assert.That(bytes[3]).IsEqualTo((byte)0xE9); // SBC #
-        await Assert.That(bytes[4]).IsEqualTo((byte)30);
+        // Constant-folded: LDA #20
+        await Assert.That(bytes).Count().IsEqualTo(2);
+        await Assert.That(bytes[0]).IsEqualTo((byte)0xA9); // LDA #
+        await Assert.That(bytes[1]).IsEqualTo((byte)20);
     }
 
     [Test]

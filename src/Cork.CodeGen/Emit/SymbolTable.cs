@@ -130,6 +130,8 @@ public sealed class SymbolTable
             _locals[name] = zp;
         foreach (var (name, type) in _globalVarTypes)
             _varTypes[name] = type;
+        foreach (var (name, val) in _globalConstants)
+            _constants[name] = val;
         _nextZp = _globalZpEnd;
     }
 
@@ -179,6 +181,8 @@ public sealed class SymbolTable
             _locals[name] = zp;
         foreach (var (name, type) in _globalVarTypes)
             _varTypes[name] = type;
+        foreach (var (name, val) in _globalConstants)
+            _constants[name] = val;
         _nextZp = _globalZpEnd;
     }
 
@@ -242,6 +246,14 @@ public sealed class SymbolTable
     {
         CheckShadowing(name);
         _constants[name] = value;
+    }
+
+    private readonly Dictionary<string, long> _globalConstants = [];
+
+    public void AddConstantNoShadowCheck(string name, long value)
+    {
+        _constants[name] = value;
+        _globalConstants[name] = value;
     }
 
     // --- Variable types ---

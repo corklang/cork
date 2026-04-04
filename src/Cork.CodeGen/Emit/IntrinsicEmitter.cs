@@ -323,15 +323,25 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             if (decl is ConstArrayDeclNode { Size: 63 } constArr &&
                 dataAddresses.TryGetValue(constArr.Name, out var srcAddr))
             {
-                var ptrName = constArr.Name.Replace("Data", "Ptr");
+                // Try multiple naming conventions to find the sprite pointer
+                string[] ptrNames = [
+                    constArr.Name.Replace("Data", "Ptr"),
+                    constArr.Name.EndsWith("Sprite") ? constArr.Name[..^6] + "Ptr" : "",
+                    "spritePtr"
+                ];
                 byte? ptrValue = null;
-                foreach (var gv in program.Declarations.OfType<GlobalVarDeclNode>())
+                foreach (var tryName in ptrNames)
                 {
-                    if (gv.Name == ptrName && gv.Initializer is IntLiteralExpr intLit)
+                    if (tryName == "") continue;
+                    foreach (var gv in program.Declarations.OfType<GlobalVarDeclNode>())
                     {
-                        ptrValue = (byte)intLit.Value;
-                        break;
+                        if (gv.Name == tryName && gv.Initializer is IntLiteralExpr intLit)
+                        {
+                            ptrValue = (byte)intLit.Value;
+                            break;
+                        }
                     }
+                    if (ptrValue != null) break;
                 }
 
                 if (ptrValue == null) continue;

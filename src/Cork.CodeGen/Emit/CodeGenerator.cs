@@ -71,6 +71,12 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
             if (decl is GlobalMethodNode gm)
                 RegisterGlobalMethod(ctx, gm);
 
+        // Also register const-initialized globals as compile-time constants
+        // (so TryGetConstant finds them for sprite pointers etc.)
+        foreach (var gv in globalVars)
+            if (gv.Initializer is IntLiteralExpr constInit)
+                ctx.Symbols.AddConstantNoShadowCheck(gv.Name, constInit.Value);
+
         // Emit SEI + global init
         ctx.Buffer.EmitSei();
         foreach (var gv in globalVars)
@@ -147,6 +153,11 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         foreach (var decl in program.Declarations)
             if (decl is GlobalMethodNode gm2)
                 RegisterGlobalMethod(ctx, gm2);
+
+        // Register const-initialized globals as compile-time constants (must match Generate pass)
+        foreach (var gv in globalVars)
+            if (gv.Initializer is IntLiteralExpr constInit)
+                ctx.Symbols.AddConstantNoShadowCheck(gv.Name, constInit.Value);
 
         ctx.Buffer.EmitSei();
         foreach (var gv in globalVars)
