@@ -1,0 +1,225 @@
+{
+  "Scene": {
+    "prefix": "scene",
+    "body": [
+      "scene ${1:Name} {",
+      "\thardware {",
+      "\t\tborder: Color.${2:black};",
+      "\t\tbackground: Color.${3:black};",
+      "\t}",
+      "",
+      "\tenter {",
+      "\t\t$0",
+      "\t}",
+      "",
+      "\tframe {",
+      "\t\t",
+      "\t}",
+      "}"
+    ],
+    "description": "Scene with hardware, enter, and frame blocks"
+  },
+  "Entry Scene": {
+    "prefix": "entry",
+    "body": [
+      "entry scene ${1:Main} {",
+      "\thardware {",
+      "\t\tborder: Color.${2:black};",
+      "\t\tbackground: Color.${3:black};",
+      "\t}",
+      "",
+      "\tenter {",
+      "\t\t$0",
+      "\t}",
+      "",
+      "\tframe {",
+      "\t\t",
+      "\t}",
+      "}"
+    ],
+    "description": "Entry scene (program start)"
+  },
+  "Sprite Block": {
+    "prefix": "sprite",
+    "body": [
+      "sprite ${1:0} ${2:name} {",
+      "\tdata: ${3:spriteData};",
+      "\tx: ${4:172};",
+      "\ty: ${5:150};",
+      "\tcolor: Color.${6:green};",
+      "}"
+    ],
+    "description": "Sprite declaration with data, position, and color"
+  },
+  "Sprite Data (Hi-Res)": {
+    "prefix": "spritedata",
+    "body": [
+      "data: `",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "\t. . . . . . . . . . . . . . . . . . . . . . . .",
+      "`;$0"
+    ],
+    "description": "24x21 hi-res sprite pattern template (blank)"
+  },
+  "Sprite Data (Multicolor)": {
+    "prefix": "spritemc",
+    "body": [
+      "data: `",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "\t.   .   .   .   .   .   .   .   .   .   .   .",
+      "`;$0"
+    ],
+    "description": "12x21 multicolor sprite pattern template (blank)"
+  },
+  "Raster Block": {
+    "prefix": "raster",
+    "body": [
+      "raster ${1:100} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Raster interrupt at scanline"
+  },
+  "For Loop": {
+    "prefix": "for",
+    "body": [
+      "for (byte ${1:i} = ${2:0}; ${1:i} < ${3:10}; ${1:i} += ${4:1}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "C-style for loop"
+  },
+  "For-Each Loop": {
+    "prefix": "foreach",
+    "body": [
+      "for (${1:item} in ${2:collection}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "For-each loop over array"
+  },
+  "While Loop": {
+    "prefix": "while",
+    "body": [
+      "while (${1:condition}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "While loop"
+  },
+  "If/Else": {
+    "prefix": "if",
+    "body": [
+      "if (${1:condition}) {",
+      "\t$0",
+      "} else {",
+      "\t",
+      "}"
+    ],
+    "description": "If/else block"
+  },
+  "Switch": {
+    "prefix": "switch",
+    "body": [
+      "switch (${1:value}) {",
+      "\tcase ${2:value1}:",
+      "\t\t$0",
+      "\tcase ${3:value2}:",
+      "\t\t",
+      "\tdefault:",
+      "\t\t",
+      "}"
+    ],
+    "description": "Switch statement"
+  },
+  "Struct": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name} {",
+      "\tbyte ${2:field} = ${3:0};",
+      "",
+      "\t${4:method}: {",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "Struct with field and method"
+  },
+  "Enum": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Name} : byte {",
+      "\t${2:first} = ${3:0},",
+      "\t${4:second} = ${5:1}",
+      "}"
+    ],
+    "description": "Enum declaration"
+  },
+  "Method": {
+    "prefix": "method",
+    "body": [
+      "${1:name}: ${2:(${3:byte} ${4:arg})} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Method declaration"
+  },
+  "Poke": {
+    "prefix": "poke",
+    "body": "poke: ${1:0xD020} value: ${2:0};$0",
+    "description": "poke: addr value: val"
+  },
+  "PrintAt": {
+    "prefix": "printAt",
+    "body": "printAt: ${1:0} text: \"${2:HELLO}\";$0",
+    "description": "printAt: position text: string"
+  },
+  "Hardware Block": {
+    "prefix": "hardware",
+    "body": [
+      "hardware {",
+      "\tborder: Color.${1:black};",
+      "\tbackground: Color.${2:black};",
+      "}"
+    ],
+    "description": "Hardware configuration block"
+  }
+}

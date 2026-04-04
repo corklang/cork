@@ -69,11 +69,13 @@ The compiler already produces errors with `file(line,col)` format. The extension
 ### Error Format
 
 Current compiler output:
+
 ```
 Error: samples/test.cork(5,15): poke address must be constant, constant + expr, or word variable
 ```
 
 The extension parses this with a regex like:
+
 ```
 ^Error: (.+)\((\d+),(\d+)\): (.+)$
 ```
@@ -81,6 +83,7 @@ The extension parses this with a regex like:
 ### Warning Support (Future)
 
 The compiler could emit warnings (unused variables, unreachable code) in the same format:
+
 ```
 Warning: samples/test.cork(12,5): variable 'temp' is never used
 ```
@@ -90,6 +93,7 @@ Warning: samples/test.cork(12,5): variable 'temp' is never used
 ### Keyword Completion
 
 Trigger on typing — suggest keywords contextually:
+
 - Top level: `entry`, `scene`, `struct`, `enum`, `const`, `import`, `byte`, `word`, etc.
 - Inside scene: `hardware`, `enter`, `frame`, `exit`, `raster`, `sprite`, type keywords
 - Inside hardware block: `mode`, `border`, `background`, `background1`, `background2`, `background3`, `multicolor0`, `multicolor1`
@@ -99,6 +103,7 @@ Trigger on typing — suggest keywords contextually:
 ### Color Constants
 
 When typing `Color.`, suggest all C64 colors:
+
 ```
 black, white, red, cyan, purple, green, blue, yellow,
 orange, brown, lightRed, darkGrey, grey, lightGreen, lightBlue, lightGrey
@@ -107,6 +112,7 @@ orange, brown, lightRed, darkGrey, grey, lightGreen, lightBlue, lightGrey
 ### Graphics Mode Completion
 
 When typing `mode:`, suggest:
+
 ```
 text, multicolorText, bitmap, multicolorBitmap, ecm
 ```
@@ -177,7 +183,7 @@ A custom editor feature: when the cursor is inside a backtick sprite pattern, sh
 - Update live as the user edits
 
 This could be implemented as:
-- A VS Code webview panel (side panel)
+
 - A CodeLens decoration above the pattern
 - A hover tooltip
 
@@ -225,6 +231,7 @@ cork ${file} -o /tmp/output.prg && x64sc -autostart /tmp/output.prg
 Future: if the compiler generates a VICE monitor label file (`.vs` format), the extension could map breakpoints to source locations.
 
 Label file format:
+
 ```
 al 080E .scene_Game
 al 0850 .method_clearScreen
@@ -295,25 +302,30 @@ Hover over identifiers to see type and value information:
 ## Implementation Phases
 
 ### Phase 1: Syntax Highlighting + Snippets
+
 - TextMate grammar for `.cork` files
 - Basic snippets for common patterns
 - File icon
 
 ### Phase 2: Error Diagnostics + Build Tasks
+
 - Run compiler on save, parse errors
 - Problem matcher for build tasks
 - Status bar memory usage
 
 ### Phase 3: Autocomplete + Hover
+
 - Keyword and constant completion
 - Scene/method/type name completion
 - Basic hover information
 
 ### Phase 4: Sprite Preview + VICE Integration
+
 - Inline sprite pattern visualization
 - Run/debug commands with VICE
 
 ### Phase 5: Language Server (Full)
+
 - Semantic highlighting
 - Go to definition
 - Find references

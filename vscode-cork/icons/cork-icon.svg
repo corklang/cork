@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Background: C64 blue -->
+  <rect width="32" height="32" rx="4" fill="#4040E0"/>
+  <!-- "C" letter in C64 light blue -->
+  <text x="16" y="23" font-family="monospace" font-size="22" font-weight="bold" fill="#7070FF" text-anchor="middle">C</text>
+  <!-- Pixel accent (bottom-right corner, like a sprite pixel) -->
+  <rect x="22" y="22" width="4" height="4" fill="#50FF50"/>
+</svg>
