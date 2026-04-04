@@ -114,9 +114,17 @@ public sealed class Parser(List<Token> tokens)
         if (Check(TokenKind.ExitKw))
             return ParseExitBlock();
 
-        // Scene-local variable
-        if (IsTypeKeyword(Current.Kind))
+        // Scene-local variable: type name [= expr];
+        if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && !PeekIs(2, TokenKind.Colon))
             return ParseSceneVarDecl();
+
+        // Scene method with return type: type name: ...
+        if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && PeekIs(2, TokenKind.Colon))
+            return ParseSceneMethod();
+
+        // Scene method without return type: name: { ... } or name: (type param) ...
+        if (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Colon))
+            return ParseSceneMethod();
 
         throw Error($"Expected scene member, got '{Current.Text}'");
     }
@@ -185,6 +193,42 @@ public sealed class Parser(List<Token> tokens)
             init = ParseExpression();
         Expect(TokenKind.Semicolon, ";");
         return new SceneVarDeclNode(typeName, name, init, loc);
+    }
+
+    private SceneMethodNode ParseSceneMethod()
+    {
+        var loc = CurrentLocation;
+        string? returnType = null;
+
+        // Check for return type (type keyword before selector name)
+        if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && PeekIs(2, TokenKind.Colon))
+            returnType = Advance().Text;
+
+        // Parse selector segments with parameters
+        var parameters = new List<MethodParameter>();
+        while (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Colon))
+        {
+            var selectorName = Advance().Text;
+            Advance(); // consume colon
+
+            // Check for parameter: (type name)
+            if (Check(TokenKind.OpenParen))
+            {
+                Advance(); // (
+                var paramType = Advance().Text;
+                var paramName = Expect(TokenKind.Identifier, "parameter name").Text;
+                Expect(TokenKind.CloseParen, ")");
+                parameters.Add(new MethodParameter(selectorName, paramType, paramName));
+            }
+            else
+            {
+                // No parameter for this segment (e.g., clearScreen:)
+                parameters.Add(new MethodParameter(selectorName, "", ""));
+            }
+        }
+
+        var body = ParseBlock();
+        return new SceneMethodNode(returnType, parameters, body, loc);
     }
 
     // ============================================================

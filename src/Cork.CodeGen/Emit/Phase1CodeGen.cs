@@ -84,30 +84,79 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 
         private string NextLabel(string prefix) => $"{prefix}_{_labelCounter++}";
 
+        private readonly Dictionary<string, List<MethodParameter>> _methodParams = [];
+
         public void EmitScene(SceneNode scene)
         {
+            // Pre-register method parameters so calls can store args to the right ZP slots
+            foreach (var member in scene.Members)
+            {
+                if (member is SceneMethodNode method)
+                {
+                    _methodParams[method.SelectorName] = method.Parameters;
+                    foreach (var param in method.Parameters)
+                    {
+                        if (param.ParamName != "")
+                            AllocZeroPage(param.ParamName);
+                    }
+                }
+            }
+
             // Disable KERNAL interrupts — stops cursor blink and keyboard scan
             Buffer.EmitSei();
 
+            // Hardware setup
             foreach (var member in scene.Members)
                 if (member is HardwareBlockNode hw)
                     EmitHardwareBlock(hw);
 
+            // Scene variables
             foreach (var member in scene.Members)
                 if (member is SceneVarDeclNode varDecl)
                     EmitSceneVar(varDecl);
 
+            // Enter block
             foreach (var member in scene.Members)
                 if (member is EnterBlockNode enter)
                     EmitBlock(enter.Body);
 
+            // Frame loop with vsync
             Buffer.DefineLabel("_frame_loop");
+            EmitVsyncWait();
             foreach (var member in scene.Members)
             {
                 if (member is FrameBlockNode frame)
                     EmitBlock(frame.Body);
             }
             Buffer.EmitJmpAbsolute(Buffer.GetLabel("_frame_loop"));
+
+            // Emit scene methods after the main loop
+            foreach (var member in scene.Members)
+            {
+                if (member is SceneMethodNode method)
+                    EmitSceneMethod(method);
+            }
+        }
+
+        private void EmitVsyncWait()
+        {
+            // Wait for raster line 251 (vertical blank area)
+            // LDA $D012 (3 bytes) + CMP #$FB (2 bytes) + BNE (2 bytes) = 7 bytes
+            // BNE target = start of LDA = current_pos - 7 from end of BNE
+            // BNE offset = -(3+2+2) = -7
+            Buffer.EmitLdaAbsolute(0xD012);     // 3 bytes
+            Buffer.EmitCmpImmediate(251);        // 2 bytes
+            Buffer.EmitBne(unchecked((sbyte)-7)); // 2 bytes, branch back 7
+        }
+
+        private void EmitSceneMethod(SceneMethodNode method)
+        {
+            var label = $"_method_{method.SelectorName}";
+            Buffer.DefineLabel(label);
+
+            // Parameters already allocated in the pre-registration pass
+            EmitBlock(method.Body);
+            Buffer.EmitRts();
         }
 
         private void EmitHardwareBlock(HardwareBlockNode hw)
@@ -211,9 +260,8 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 
             Buffer.DefineLabel(loopLabel);
 
-            // Emit condition: compare, then branch-over-JMP if false
-            EmitComparisonToFlags(whileStmt.Condition);
-            EmitBranchIfTrue(2 + 1); // skip over JMP (3 bytes): branch offset = 3
+            // Emit condition: branch-if-true skips over the JMP-to-end (3 bytes)
+            EmitConditionBranchTrue(whileStmt.Condition, 3);
             Buffer.EmitJmpForward(endLabel);
 
             // Body
@@ -231,17 +279,15 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 
             if (ifStmt.ElseBody == null && ifStmt.ElseIfs.Count == 0)
             {
-                // Simple if
-                EmitComparisonToFlags(ifStmt.Condition);
-                EmitBranchIfTrue(2 + 1); // skip JMP
+                // Simple if: branch-if-true skips over JMP-to-end (3 bytes)
+                EmitConditionBranchTrue(ifStmt.Condition, 3);
                 Buffer.EmitJmpForward(endLabel);
                 EmitBlock(ifStmt.ThenBody);
             }
             else
             {
                 var elseLabel = NextLabel("else");
-                EmitComparisonToFlags(ifStmt.Condition);
-                EmitBranchIfTrue(2 + 1);
+                EmitConditionBranchTrue(ifStmt.Condition, 3);
                 Buffer.EmitJmpForward(elseLabel);
                 EmitBlock(ifStmt.ThenBody);
                 Buffer.EmitJmpForward(endLabel);
@@ -254,78 +300,88 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         }
 
         /// <summary>
-        /// Emits comparison, sets CPU flags. Caller should emit the right branch.
+        /// Emits condition check + branch-if-TRUE over the given number of bytes.
+        /// The offset is the number of bytes to skip if condition is true (typically 3 for a JMP).
         /// </summary>
-        private TokenKind _lastComparisonOp;
-
-        private void EmitComparisonToFlags(ExprNode condition)
+        private void EmitConditionBranchTrue(ExprNode condition, int skipBytes)
         {
-            if (condition is not BinaryExpr bin)
-                throw new InvalidOperationException("Phase 1: condition must be a comparison");
-
-            _lastComparisonOp = bin.Op;
-
-            // Load left into A, compare with right
-            EmitExprToA(bin.Left);
-
-            if (bin.Right is IntLiteralExpr intLit)
+            // Joystick check: joystick.port2.{direction}
+            if (IsJoystickCheck(condition, out var bitMask))
             {
-                Buffer.EmitCmpImmediate((byte)intLit.Value);
+                // CIA1 $DC00 = joystick port 2. Bits are ACTIVE LOW (0 = pressed).
+                // LDA $DC00; AND #mask; BEQ skip (zero = pressed = true)
+                Buffer.EmitLdaAbsolute(0xDC00);      // 3 bytes
+                Buffer.EmitByte(0x29);                // AND immediate opcode
+                Buffer.EmitByte(bitMask);             // 2 bytes
+                Buffer.EmitBeq((sbyte)skipBytes);     // 2 bytes: branch if zero (pressed)
+                return;
             }
-            else if (bin.Right is IdentifierExpr ident)
+
+            // Binary comparison
+            if (condition is BinaryExpr bin)
             {
-                Buffer.EmitCmpZeroPage(GetLocal(ident.Name));
+                EmitExprToA(bin.Left);
+
+                if (bin.Right is IntLiteralExpr intLit)
+                    Buffer.EmitCmpImmediate((byte)intLit.Value);
+                else if (bin.Right is IdentifierExpr ident)
+                    Buffer.EmitCmpZeroPage(GetLocal(ident.Name));
+                else
+                {
+                    Buffer.EmitPha();
+                    EmitExprToA(bin.Right);
+                    Buffer.EmitStaZeroPage(0x0F);
+                    Buffer.EmitPla();
+                    Buffer.EmitCmpZeroPage(0x0F);
+                }
+
+                // Emit branch-if-true
+                switch (bin.Op)
+                {
+                    case TokenKind.Less:
+                        Buffer.EmitBcc((sbyte)skipBytes);
+                        break;
+                    case TokenKind.GreaterEqual:
+                        Buffer.EmitBcs((sbyte)skipBytes);
+                        break;
+                    case TokenKind.EqualEqual:
+                        Buffer.EmitBeq((sbyte)skipBytes);
+                        break;
+                    case TokenKind.BangEqual:
+                        Buffer.EmitBne((sbyte)skipBytes);
+                        break;
+                    default:
+                        throw new InvalidOperationException($"Unsupported comparison: {bin.Op}");
+                }
+                return;
             }
-            else
-            {
-                // Complex right side: evaluate to temp
-                Buffer.EmitPha();
-                EmitExprToA(bin.Right);
-                Buffer.EmitStaZeroPage(0x0F);
-                Buffer.EmitPla();
-                Buffer.EmitCmpZeroPage(0x0F);
-            }
+
+            throw new InvalidOperationException($"Unsupported condition: {condition.GetType().Name}");
         }
 
-        /// <summary>
-        /// Emit a branch-if-condition-is-true with the given offset.
-        /// Uses the last comparison op to determine which branch to emit.
-        /// The offset is relative to the byte after the branch instruction.
-        /// </summary>
-        private void EmitBranchIfTrue(int offset)
+        private static bool IsJoystickCheck(ExprNode expr, out byte bitMask)
         {
-            switch (_lastComparisonOp)
+            bitMask = 0;
+            // Match: joystick.port2.{up|down|left|right|fire}
+            if (expr is MemberAccessExpr { Receiver: MemberAccessExpr { Receiver: IdentifierExpr { Name: "joystick" }, MemberName: "port2" } } outer)
             {
-                case TokenKind.Less:
-                    Buffer.EmitBcc((sbyte)offset); // carry clear = A < operand
-                    break;
-                case TokenKind.GreaterEqual:
-                    Buffer.EmitBcs((sbyte)offset); // carry set = A >= operand
-                    break;
-                case TokenKind.EqualEqual:
-                    Buffer.EmitBeq((sbyte)offset);
-                    break;
-                case TokenKind.BangEqual:
-                    Buffer.EmitBne((sbyte)offset);
-                    break;
-                case TokenKind.Greater:
-                    // A > operand: carry set AND zero clear
-                    // BEQ skip; BCS target; skip:
-                    Buffer.EmitBeq(2); // skip BCS if equal
-                    Buffer.EmitBcs((sbyte)(offset - 2)); // adjust offset
-                    break;
-                case TokenKind.LessEqual:
-                    // A <= operand: carry clear OR zero set
-                    Buffer.EmitBeq((sbyte)offset);
-                    Buffer.EmitBcc((sbyte)(offset - 2));
-                    break;
-                default:
-                    throw new InvalidOperationException($"Phase 1: unsupported comparison {_lastComparisonOp}");
+                bitMask = outer.MemberName switch
+                {
+                    "up" => 0x01,
+                    "down" => 0x02,
+                    "left" => 0x04,
+                    "right" => 0x08,
+                    "fire" => 0x10,
+                    _ => 0
+                };
+                return bitMask != 0;
             }
+            return false;
         }
 
         private void EmitMessageSend(MessageSendStmt msgSend)
         {
+            // Built-in intrinsic: poke: addr value: val
             if (msgSend.Receiver == null && msgSend.Segments.Count == 2 &&
                 msgSend.Segments[0].Name == "poke" && msgSend.Segments[1].Name == "value")
             {
@@ -333,7 +389,31 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 return;
             }
 
-            throw new InvalidOperationException("Phase 1: unsupported message send");
+            // Scene method call (no receiver)
+            if (msgSend.Receiver == null && msgSend.Segments.Count > 0)
+            {
+                var selectorName = string.Join("", msgSend.Segments.Select(s => s.Name + ":"));
+                var label = $"_method_{selectorName}";
+
+                // Pass arguments to the method's parameter ZP slots
+                if (_methodParams.TryGetValue(selectorName, out var methodParams))
+                {
+                    for (var i = 0; i < msgSend.Segments.Count; i++)
+                    {
+                        if (msgSend.Segments[i].Argument != null && i < methodParams.Count && methodParams[i].ParamName != "")
+                        {
+                            EmitExprToA(msgSend.Segments[i].Argument!);
+                            Buffer.EmitStaZeroPage(GetLocal(methodParams[i].ParamName));
+                        }
+                    }
+                }
+
+                // JSR to method (forward reference — method emitted after main loop)
+                Buffer.EmitJsrForward(label);
+                return;
+            }
+
+            throw new InvalidOperationException($"Unsupported message send");
         }
 
         private void EmitPoke(ExprNode addressExpr, ExprNode valueExpr)

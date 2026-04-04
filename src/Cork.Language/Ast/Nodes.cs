@@ -78,6 +78,16 @@ public sealed record SceneVarDeclNode(
     SourceLocation Location
 ) : SceneMemberNode(Location);
 
+public sealed record SceneMethodNode(
+    string? ReturnType,
+    List<MethodParameter> Parameters,
+    BlockNode Body,
+    SourceLocation Location
+) : SceneMemberNode(Location)
+{
+    public string SelectorName => string.Join("", Parameters.Select(p => p.SelectorName + ":"));
+}
+
 // ============================================================
 // Statements
 // ============================================================
@@ -132,12 +142,20 @@ public sealed record BreakStmt(SourceLocation Location) : StmtNode(Location);
 public sealed record ContinueStmt(SourceLocation Location) : StmtNode(Location);
 
 // ============================================================
-// Selector segment (for message sends)
+// Selector segments
 // ============================================================
 
+// For call sites: name: argument
 public sealed record SelectorSegment(
     string Name,
     ExprNode? Argument
+);
+
+// For method declarations: name: (type paramName)
+public sealed record MethodParameter(
+    string SelectorName,
+    string TypeName,
+    string ParamName
 );
 
 // ============================================================

@@ -116,6 +116,16 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     }
 
     /// <summary>
+    /// Emit a JSR with a forward reference to be patched later.
+    /// </summary>
+    public void EmitJsrForward(string label)
+    {
+        EmitByte(0x20);
+        _fixups.Add((_bytes.Count, label));
+        EmitWord(0x0000); // placeholder
+    }
+
+    /// <summary>
     /// Calculate branch offset from current position to a label.
     /// Must be called AFTER the branch opcode+operand bytes are reserved.
     /// </summary>
