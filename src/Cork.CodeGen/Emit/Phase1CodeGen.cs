@@ -81,7 +81,8 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         foreach (var scene in scenes)
             emitter.EmitScene(scene);
 
-        // Emit global methods (shared across scenes)
+        // Reset to global-only scope before emitting global methods
+        emitter.ResetToGlobalScope();
         var globalMethods = program.Declarations.OfType<GlobalMethodNode>().ToList();
         foreach (var gm in globalMethods)
             emitter.EmitGlobalMethod(gm);
@@ -202,6 +203,7 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             if (!_globals.ContainsKey(name))
             {
                 _globals[name] = _globalZpEnd++;
+                _globalNames.Add(name);
             }
         }
 
@@ -222,6 +224,7 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 
         public void RegisterGlobalMethod(GlobalMethodNode gm)
         {
+            _globalNames.Add(gm.SelectorName);
             _methodParams[gm.SelectorName] = gm.Parameters;
             foreach (var param in gm.Parameters)
             {
@@ -270,6 +273,17 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             }
         }
 
+        public void ResetToGlobalScope()
+        {
+            _locals.Clear();
+            _varTypes.Clear();
+            _constants.Clear();
+            _structInstances.Clear();
+            foreach (var (name, zp) in _globals)
+                _locals[name] = zp;
+            _nextZp = _globalZpEnd;
+        }
+
         public void EmitGlobalMethod(GlobalMethodNode gm)
         {
             var label = $"_method_{gm.SelectorName}";
@@ -283,6 +297,7 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             // Reset scene-local ZP allocation (after globals)
             _locals.Clear();
             _varTypes.Clear();
+            _constants.Clear();
             _structInstances.Clear();
             _emittedStructMethods.Clear();
             foreach (var (name, zp) in _globals)
@@ -292,16 +307,32 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             // Define scene label for `go` transitions
             Buffer.DefineLabel($"_scene_{scene.Name}");
 
+            // Collect scene variable names for shadowing checks
+            var sceneVarNames = new HashSet<string>();
+            foreach (var member in scene.Members)
+            {
+                if (member is SceneVarDeclNode varDecl)
+                    sceneVarNames.Add(varDecl.Name);
+            }
+
             // Pre-register method parameters
             foreach (var member in scene.Members)
             {
                 if (member is SceneMethodNode method)
                 {
+                    if (_globalNames.Contains(method.SelectorName))
+                        throw new InvalidOperationException($"Scene method '{method.SelectorName}' shadows a global method");
                     _methodParams[method.SelectorName] = method.Parameters;
                     foreach (var param in method.Parameters)
                     {
                         if (param.ParamName != "")
+                        {
+                            // Check param doesn't shadow a scene variable
+                            if (sceneVarNames.Contains(param.ParamName))
+                                throw new InvalidOperationException(
+                                    $"Parameter '{param.ParamName}' in method '{method.SelectorName}' shadows a scene declaration");
                             AllocZeroPage(param.ParamName);
+                        }
                     }
                 }
             }
@@ -501,6 +532,7 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             // Const: store value in compile-time table, no ZP, no code
             if (decl.IsConst && decl.Initializer is IntLiteralExpr constLit)
             {
+                CheckShadowing(decl.Name);
                 _constants[decl.Name] = constLit.Value;
                 return;
             }
@@ -558,6 +590,7 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         {
             if (decl.IsConst && decl.Initializer is IntLiteralExpr constLit)
             {
+                CheckShadowing(decl.Name);
                 _constants[decl.Name] = constLit.Value;
                 return;
             }
@@ -637,9 +670,10 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 
         private byte AllocWordZeroPage(string name)
         {
+            CheckShadowing(name);
             var addr = _nextZp;
-            _nextZp += 2; // word takes 2 bytes
-            if (_nextZp >= 0xFB) throw new InvalidOperationException("Out of zero page slots");
+            _nextZp += 2;
+            if (_nextZp >= 0xEF) throw new InvalidOperationException("Out of zero page slots");
             _locals[name] = addr;
             _varTypes[name] = "word";
             return addr;
@@ -1198,11 +1232,23 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             throw new InvalidOperationException($"Unknown constant: {member.Receiver}");
         }
 
+        // Names defined at global scope (for shadowing checks)
+        private readonly HashSet<string> _globalNames = [];
+
+        private void CheckShadowing(string name)
+        {
+            // Only check user-visible names (skip internal names with _ or $ prefix)
+            if (name.StartsWith('_') || name.Contains('$')) return;
+            if (_globalNames.Contains(name))
+                throw new InvalidOperationException($"'{name}' shadows a global declaration");
+        }
+
         private byte AllocZeroPage(string name)
         {
+            CheckShadowing(name);
             if (_locals.ContainsKey(name)) return _locals[name];
             var addr = _nextZp++;
-            if (_nextZp >= 0x0F) throw new InvalidOperationException("Phase 1: out of zero page slots");
+            if (_nextZp >= 0xEF) throw new InvalidOperationException("Out of zero page slots");
             _locals[name] = addr;
             return addr;
         }
