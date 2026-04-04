@@ -39,14 +39,20 @@ try
 
     // Generate 6510 code
     var codeStart = PrgWriter.CalculateCodeStart();
-    var codeGen = new Phase1CodeGen(codeStart);
+    var codeGen = new CodeGenerator(codeStart);
     var (machineCode, _) = codeGen.Generate(program);
-    Console.WriteLine($"  Generated {machineCode.Length} bytes at ${codeStart:X4}");
 
     // Write PRG
     PrgWriter.WriteToFile(outputPath, machineCode);
     var fileSize = new FileInfo(outputPath).Length;
+
+    // Memory usage report
+    var codeEnd = (ushort)(codeStart + machineCode.Length);
+    var availableRam = 0x9FFF - codeStart; // $080E to $9FFF (BASIC ROM banked out)
+    var usedPercent = machineCode.Length * 100 / availableRam;
+    Console.WriteLine($"  Code:   ${codeStart:X4}-${codeEnd:X4} ({machineCode.Length} bytes)");
     Console.WriteLine($"  Output: {outputPath} ({fileSize} bytes)");
+    Console.WriteLine($"  RAM:    {machineCode.Length}/{availableRam} bytes used ({usedPercent}%)");
 
     return 0;
 }

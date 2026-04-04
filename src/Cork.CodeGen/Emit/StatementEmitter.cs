@@ -31,7 +31,12 @@ public sealed class StatementEmitter(EmitContext ctx)
     public void EmitBlock(BlockNode block)
     {
         foreach (var stmt in block.Statements)
+        {
             EmitStatement(stmt);
+            // Dead code elimination: stop emitting after terminal statements
+            if (stmt is ReturnStmt or BreakStmt or ContinueStmt or GoStmt)
+                break;
+        }
     }
 
     private void EmitReturn(ReturnStmt ret)
