@@ -296,6 +296,34 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
 
     public void EmitConditionBranchTrue(ExprNode condition, int skipBytes)
     {
+        // Sprite collision: player collidedWith: enemy
+        if (condition is MessageSendExpr { Segments: [{ Name: "collidedWith" }] } collMsg &&
+            collMsg.Receiver is IdentifierExpr collReceiver &&
+            collMsg.Segments[0].Argument is IdentifierExpr collTarget)
+        {
+            // Read $D01E (sprite-sprite collision), AND with both sprites' bits
+            ctx.Symbols.TryGetSpriteSync(
+                ctx.Symbols.GetLocal($"{collReceiver.Name}$x"), out _);
+            ctx.Symbols.TryGetSpriteSync(
+                ctx.Symbols.GetLocal($"{collTarget.Name}$x"), out _);
+
+            // Get sprite indices from the sync registrations
+            var recvXZp = ctx.Symbols.GetLocal($"{collReceiver.Name}$x");
+            var targXZp = ctx.Symbols.GetLocal($"{collTarget.Name}$x");
+            ctx.Symbols.TryGetSpriteSync(recvXZp, out var recvReg);
+            ctx.Symbols.TryGetSpriteSync(targXZp, out var targReg);
+            var recvIdx = (recvReg - 0xD000) / 2;
+            var targIdx = (targReg - 0xD000) / 2;
+            var mask = (byte)((1 << recvIdx) | (1 << targIdx));
+
+            // LDA $D01E; AND #mask; CMP #mask; BEQ +skipBytes (both bits set = collision)
+            ctx.Buffer.EmitLdaAbsolute(0xD01E);
+            ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(mask); // AND #mask
+            ctx.Buffer.EmitCmpImmediate(mask);
+            ctx.Buffer.EmitBeq((sbyte)skipBytes);
+            return;
+        }
+
         if (IsJoystickCheck(condition, out var bitMask))
         {
             ctx.Buffer.EmitLdaAbsolute(0xDC00);

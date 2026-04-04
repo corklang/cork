@@ -412,6 +412,18 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
     {
         var loc = CurrentLocation;
         Expect(TokenKind.SpriteKw, "sprite");
+
+        // Parse sprite number: sprite 0 name { ... }
+        int spriteIndex;
+        if (Check(TokenKind.IntegerLiteral))
+        {
+            spriteIndex = (int)((IntLiteralExpr)ParsePrimary()).Value;
+        }
+        else
+        {
+            spriteIndex = _spriteCounter++;
+        }
+
         var name = Expect(TokenKind.Identifier, "sprite name").Text;
         Expect(TokenKind.OpenBrace, "{");
 
@@ -427,7 +439,7 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
         }
 
         Expect(TokenKind.CloseBrace, "}");
-        return new SpriteBlockNode(name, _spriteCounter++, settings, loc);
+        return new SpriteBlockNode(name, spriteIndex, settings, loc);
     }
 
     private SceneVarDeclNode ParseSceneVarDecl()

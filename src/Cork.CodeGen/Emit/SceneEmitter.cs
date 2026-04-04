@@ -205,59 +205,105 @@ public sealed class SceneEmitter(EmitContext ctx)
     private void EmitSpriteBlock(SpriteBlockNode sprite)
     {
         var idx = sprite.SpriteIndex;
+        var bit = (byte)(1 << idx);
 
-        // Allocate ZP for x and y so they can be modified later
+        // Allocate ZP for mutable fields
         var xZp = ctx.Symbols.AllocZeroPage($"{sprite.Name}$x");
         var yZp = ctx.Symbols.AllocZeroPage($"{sprite.Name}$y");
 
-        // Register as a pseudo struct instance so sprite.x and sprite.y work
+        // Register as struct instance with auto-sync info
         var fieldMap = new Dictionary<string, byte> { ["x"] = xZp, ["y"] = yZp };
         ctx.Symbols.RegisterStructInstance(sprite.Name, "_sprite", fieldMap);
 
+        // Register auto-sync: writing to x/y auto-writes VIC-II registers
+        ctx.Symbols.RegisterSpriteSync(sprite.Name, idx, xZp, yZp);
+
+        // Parse settings
         byte initX = 0, initY = 0, color = 1;
+        bool multicolor = false, expandX = false, expandY = false, priorityBack = false;
         string? dataRef = null;
 
         foreach (var setting in sprite.Settings)
         {
-            var val = setting.Value;
             switch (setting.Name)
             {
-                case "x": initX = ctx.Expressions.EvalConstExpr(val); break;
-                case "y": initY = ctx.Expressions.EvalConstExpr(val); break;
-                case "color": color = ctx.Expressions.EvalConstExpr(val); break;
+                case "x": initX = ctx.Expressions.EvalConstExpr(setting.Value); break;
+                case "y": initY = ctx.Expressions.EvalConstExpr(setting.Value); break;
+                case "color": color = ctx.Expressions.EvalConstExpr(setting.Value); break;
+                case "multicolor": multicolor = setting.Value is BoolLiteralExpr { Value: true }; break;
+                case "expandX": expandX = setting.Value is BoolLiteralExpr { Value: true }; break;
+                case "expandY": expandY = setting.Value is BoolLiteralExpr { Value: true }; break;
+                case "priority":
+                    if (setting.Value is IdentifierExpr { Name: "back" }) priorityBack = true;
+                    break;
                 case "data":
-                    if (val is IdentifierExpr dataIdent)
-                        dataRef = dataIdent.Name;
+                    if (setting.Value is IdentifierExpr dataIdent) dataRef = dataIdent.Name;
                     break;
             }
         }
 
-        // Initialize ZP variables
+        // Initialize ZP
         ctx.Buffer.EmitLdaImmediate(initX);
         ctx.Buffer.EmitStaZeroPage(xZp);
         ctx.Buffer.EmitLdaImmediate(initY);
         ctx.Buffer.EmitStaZeroPage(yZp);
 
-        // Write VIC-II registers
+        // VIC-II register init
         ctx.Buffer.EmitLdaImmediate(initX);
-        ctx.Buffer.EmitStaAbsolute((ushort)(0xD000 + idx * 2));     // sprite X
+        ctx.Buffer.EmitStaAbsolute((ushort)(0xD000 + idx * 2));
         ctx.Buffer.EmitLdaImmediate(initY);
-        ctx.Buffer.EmitStaAbsolute((ushort)(0xD001 + idx * 2));     // sprite Y
+        ctx.Buffer.EmitStaAbsolute((ushort)(0xD001 + idx * 2));
         ctx.Buffer.EmitLdaImmediate(color);
-        ctx.Buffer.EmitStaAbsolute((ushort)(0xD027 + idx));         // sprite color
+        ctx.Buffer.EmitStaAbsolute((ushort)(0xD027 + idx));
 
-        // Set sprite pointer (data reference)
-        if (dataRef != null && ctx.Symbols.TryGetConstant($"{dataRef[..^4]}Ptr", out var ptrVal))
+        // Sprite pointer
+        if (dataRef != null)
         {
-            // Convention: spriteData → spritePtr
-            ctx.Buffer.EmitLdaImmediate((byte)ptrVal);
-            ctx.Buffer.EmitStaAbsolute((ushort)(0x07F8 + idx));
+            // Try convention: XxxSprite → XxxPtr, or just spritePtr
+            var ptrName = dataRef.EndsWith("Sprite") ? dataRef[..^6] + "Ptr" : "spritePtr";
+            if (ctx.Symbols.TryGetConstant(ptrName, out var ptrVal))
+            {
+                ctx.Buffer.EmitLdaImmediate((byte)ptrVal);
+                ctx.Buffer.EmitStaAbsolute((ushort)(0x07F8 + idx));
+            }
         }
 
-        // Enable sprite bit
+        // Enable sprite
         ctx.Buffer.EmitLdaAbsolute(0xD015);
-        ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte((byte)(1 << idx)); // ORA #bit
+        ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit); // ORA #bit
         ctx.Buffer.EmitStaAbsolute(0xD015);
+
+        // Multicolor
+        if (multicolor)
+        {
+            ctx.Buffer.EmitLdaAbsolute(0xD01C);
+            ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit);
+            ctx.Buffer.EmitStaAbsolute(0xD01C);
+        }
+
+        // Expand X
+        if (expandX)
+        {
+            ctx.Buffer.EmitLdaAbsolute(0xD01D);
+            ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit);
+            ctx.Buffer.EmitStaAbsolute(0xD01D);
+        }
+
+        // Expand Y
+        if (expandY)
+        {
+            ctx.Buffer.EmitLdaAbsolute(0xD017);
+            ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit);
+            ctx.Buffer.EmitStaAbsolute(0xD017);
+        }
+
+        // Priority (behind background)
+        if (priorityBack)
+        {
+            ctx.Buffer.EmitLdaAbsolute(0xD01B);
+            ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit);
+            ctx.Buffer.EmitStaAbsolute(0xD01B);
+        }
     }
 
     private void AllocStructFields(string prefix, StructDeclNode structType, Dictionary<string, byte> fieldMap)

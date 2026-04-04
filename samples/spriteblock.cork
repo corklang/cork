@@ -1,28 +1,50 @@
-// Feature: declarative sprite blocks
+// Feature: full sprite support — auto-sync, multicolor, expand, collision, animation
 
 entry scene Demo {
     hardware {
-        border: Color.blue;
+        border: Color.darkGrey;
         background: Color.black;
     }
 
-    sprite ball {
-        data: spriteData;
+    sprite 0 player {
+        data: ballSprite;
         x: 172;
-        y: 140;
-        color: Color.white;
+        y: 200;
+        color: Color.green;
     }
 
+    sprite 1 enemy {
+        data: ballSprite;
+        x: 100;
+        y: 100;
+        color: Color.red;
+        expandX: true;
+        expandY: true;
+    }
+
+    byte enemyDir = 1;
+
     frame {
-        if (joystick.port2.left)  { ball.x -= 2; poke: 0xD000 value: ball.x; }
-        if (joystick.port2.right) { ball.x += 2; poke: 0xD000 value: ball.x; }
-        if (joystick.port2.up)    { ball.y -= 2; poke: 0xD001 value: ball.y; }
-        if (joystick.port2.down)  { ball.y += 2; poke: 0xD001 value: ball.y; }
+        // Move player with joystick — auto-syncs to VIC-II
+        if (joystick.port2.left)  { player.x -= 2; }
+        if (joystick.port2.right) { player.x += 2; }
+        if (joystick.port2.up)    { player.y -= 2; }
+        if (joystick.port2.down)  { player.y += 2; }
+
+        // Move enemy
+        enemy.x += enemyDir;
+        if (enemy.x > 230) { enemyDir = 255; }
+        if (enemy.x < 30)  { enemyDir = 1; }
+
+        // Collision detection (parens needed for message send in condition)
+        if ((player collidedWith: enemy)) {
+            poke: 0xD020 value: 2;
+        }
     }
 }
 
 const byte spritePtr = 13;
-const byte[63] spriteData = {
+const byte[63] ballSprite = {
     0x00, 0x7E, 0x00,
     0x01, 0xFF, 0x80,
     0x07, 0xFF, 0xE0,

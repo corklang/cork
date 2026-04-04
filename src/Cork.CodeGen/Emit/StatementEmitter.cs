@@ -175,6 +175,13 @@ public sealed class StatementEmitter(EmitContext ctx)
             default:
                 throw new InvalidOperationException($"Phase 1: unsupported assignment op {assign.Op}");
         }
+
+        // Sprite auto-sync: if this ZP has a paired VIC-II register, update it
+        if (ctx.Symbols.TryGetSpriteSync(zp, out var vicReg))
+        {
+            ctx.Buffer.EmitLdaZeroPage(zp);
+            ctx.Buffer.EmitStaAbsolute(vicReg);
+        }
     }
 
     public void EmitWordAssignment(byte zpLo, TokenKind op, ExprNode value)

@@ -25,6 +25,8 @@ public sealed class SymbolTable
     private readonly Dictionary<string, (byte ZpBase, int Length)> _stringVars = [];
     // Reference parameters (string/array): name → (ptrZpLo, ptrZpHi, lenZp)
     private readonly Dictionary<string, (byte PtrLo, byte PtrHi, byte LenZp)> _refParams = [];
+    // Sprite auto-sync: zpAddr → VIC-II register address
+    private readonly Dictionary<byte, ushort> _spriteSyncRegs = [];
 
     private byte _nextZp = 0x02;
     private byte _globalZpEnd = 0x02;
@@ -131,6 +133,17 @@ public sealed class SymbolTable
         _nextZp = _globalZpEnd;
     }
 
+    public void RegisterSpriteSync(string name, int spriteIndex, byte xZp, byte yZp)
+    {
+        _spriteSyncRegs[xZp] = (ushort)(0xD000 + spriteIndex * 2);     // X register
+        _spriteSyncRegs[yZp] = (ushort)(0xD001 + spriteIndex * 2);     // Y register
+    }
+
+    public bool TryGetSpriteSync(byte zpAddr, out ushort vicRegister)
+    {
+        return _spriteSyncRegs.TryGetValue(zpAddr, out vicRegister);
+    }
+
     public void RegisterRefParam(string name, byte ptrLo, byte ptrHi, byte lenZp)
     {
         _refParams[name] = (ptrLo, ptrHi, lenZp);
@@ -159,6 +172,7 @@ public sealed class SymbolTable
         _structInstances.Clear();
         _structArrays.Clear();
         _stringVars.Clear();
+        _spriteSyncRegs.Clear();
         // Note: _refParams NOT cleared — global method ref params persist
         _emittedStructMethods.Clear();
         foreach (var (name, zp) in _globals)
