@@ -1,0 +1,62 @@
+// Cork Standard Library: Print / Number Display
+// import "../stdlib/print.cork";
+
+// Print a byte as a 3-digit decimal number at screen position
+// Displays 000-255 with leading zeros.
+printByte: (byte _val) at: (word _pos) {
+    byte _hundreds = 0;
+    while (_val >= 100) {
+        _val -= 100;
+        _hundreds += 1;
+    }
+    byte _tens = 0;
+    while (_val >= 10) {
+        _val -= 10;
+        _tens += 1;
+    }
+    // Screen codes for digits: '0' = 48
+    poke: _pos value: _hundreds + 48;
+    _pos += 1;
+    poke: _pos value: _tens + 48;
+    _pos += 1;
+    poke: _pos value: _val + 48;
+}
+
+// Print a byte as a 2-digit hex number at screen position
+printHex: (byte _val) at: (word _pos) {
+    byte _hi = _val >> 4;
+    byte _lo = _val & 0x0F;
+    if (_hi < 10) {
+        poke: _pos value: _hi + 48;
+    } else {
+        poke: _pos value: _hi - 9;
+    }
+    _pos += 1;
+    if (_lo < 10) {
+        poke: _pos value: _lo + 48;
+    } else {
+        poke: _pos value: _lo - 9;
+    }
+}
+
+// Print a word as a 5-digit decimal number at screen position
+// Displays 00000-65535 with leading zeros.
+printWord: (word _val) at: (word _pos) {
+    byte _d4 = 0;
+    while (_val >= 10000) { _val -= 10000; _d4 += 1; }
+    byte _d3 = 0;
+    while (_val >= 1000) { _val -= 1000; _d3 += 1; }
+    byte _d2 = 0;
+    while (_val >= 100) { _val -= 100; _d2 += 1; }
+    byte _d1 = 0;
+    while (_val >= 10) { _val -= 10; _d1 += 1; }
+    poke: _pos value: _d4 + 48;
+    _pos += 1;
+    poke: _pos value: _d3 + 48;
+    _pos += 1;
+    poke: _pos value: _d2 + 48;
+    _pos += 1;
+    poke: _pos value: _d1 + 48;
+    _pos += 1;
+    poke: _pos value: _val + 48;
+}

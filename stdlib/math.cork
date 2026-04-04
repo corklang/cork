@@ -1,0 +1,58 @@
+// Cork Standard Library: Math
+// import "../stdlib/math.cork";
+
+// Absolute value of a signed byte (-128..127 → 0..127)
+// Uses bit 7 test since signed comparison is limited
+byte abs: (byte _val) {
+    if ((_val & 0x80) != 0) {
+        return 0 - _val;
+    }
+    return _val;
+}
+
+// Minimum of two bytes
+byte min: (byte _a) and: (byte _b) {
+    if (_a < _b) { return _a; }
+    return _b;
+}
+
+// Maximum of two bytes
+byte max: (byte _a) and: (byte _b) {
+    if (_a > _b) { return _a; }
+    return _b;
+}
+
+// Clamp a byte to a range
+byte clamp: (byte _val) low: (byte _lo) high: (byte _hi) {
+    if (_val < _lo) { return _lo; }
+    if (_val > _hi) { return _hi; }
+    return _val;
+}
+
+// Linear interpolation: lerp from a toward b by t/256
+// t=0 returns a, t=128 returns midpoint, t=255 returns ~b
+byte lerp: (byte _a) to: (byte _b) t: (byte _t) {
+    if (_b > _a) {
+        byte _diff = _b - _a;
+        byte _step = _diff * _t;
+        return _a + _step;
+    }
+    byte _diff = _a - _b;
+    byte _step = _diff * _t;
+    return _a - _step;
+}
+
+// Distance approximation (Manhattan distance)
+byte distance: (byte _x1) y1: (byte _y1) x2: (byte _x2) y2: (byte _y2) {
+    byte _dx = 0;
+    byte _dy = 0;
+    if (_x2 > _x1) { _dx = _x2 - _x1; } else { _dx = _x1 - _x2; }
+    if (_y2 > _y1) { _dy = _y2 - _y1; } else { _dy = _y1 - _y2; }
+    return _dx + _dy;
+}
+
+// Wrap a byte around a range (0 to max-1)
+byte wrap: (byte _val) max: (byte _limit) {
+    byte _result = _val % _limit;
+    return _result;
+}

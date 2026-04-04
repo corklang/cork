@@ -1,0 +1,32 @@
+// Cork Standard Library: Memory Utilities
+// import "../stdlib/memory.cork";
+
+// Fill memory range with a byte value (up to 255 bytes)
+memset: (word _addr) length: (byte _len) value: (byte _val) {
+    byte _i = 0;
+    while (_i < _len) {
+        poke: _addr value: _val;
+        _addr += 1;
+        _i += 1;
+    }
+}
+
+// Copy memory from src to dst (forward copy, up to 255 bytes)
+memcpy: (word _src) to: (word _dst) length: (byte _len) {
+    byte _i = 0;
+    while (_i < _len) {
+        byte _val = (peek: _src);
+        poke: _dst value: _val;
+        _src += 1;
+        _dst += 1;
+        _i += 1;
+    }
+}
+
+// Fill a large memory range (word-sized addresses)
+memfill: (word _addr) to: (word _end) value: (byte _val) {
+    while (_addr < _end) {
+        poke: _addr value: _val;
+        _addr += 1;
+    }
+}

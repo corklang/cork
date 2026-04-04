@@ -1,0 +1,41 @@
+// Cork Standard Library: Sprite Utilities
+// import "../stdlib/sprite.cork";
+
+// Bit masks for sprite numbers 0-7
+const byte[8] _spriteBits = { 1, 2, 4, 8, 16, 32, 64, 128 };
+
+// Set sprite data pointer (block number, address = ptr * 64)
+setSpriteFrame: (byte _num) ptr: (byte _ptr) {
+    poke: (0x07F8 + _num) value: _ptr;
+}
+
+// Enable a sprite by number (0-7)
+enableSprite: (byte _num) {
+    byte _mask = _spriteBits[_num];
+    byte _cur = (peek: 0xD015);
+    poke: 0xD015 value: (_cur | _mask);
+}
+
+// Disable a sprite by number (0-7)
+disableSprite: (byte _num) {
+    byte _mask = _spriteBits[_num] ^ 0xFF;
+    byte _cur = (peek: 0xD015);
+    poke: 0xD015 value: (_cur & _mask);
+}
+
+// Disable all sprites
+disableAllSprites: {
+    poke: 0xD015 value: 0;
+}
+
+// Set sprite color
+setSpriteColor: (byte _num) color: (byte _col) {
+    poke: (0xD027 + _num) value: _col;
+}
+
+// Set sprite position (8-bit X, no MSB)
+setSpritePos: (byte _num) x: (byte _px) y: (byte _py) {
+    byte _reg = _num * 2;
+    poke: (0xD000 + _reg) value: _px;
+    poke: (0xD001 + _reg) value: _py;
+}

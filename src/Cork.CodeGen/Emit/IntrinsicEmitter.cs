@@ -115,9 +115,32 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
                             ctx.Buffer.EmitStaZeroPage(refInfo.LenZp);
                         }
                     }
+                    else if (SymbolTable.Is16BitType(param.TypeName))
+                    {
+                        // Word/fixed parameter: store both bytes
+                        var paramZp = ctx.Symbols.GetLocal(param.ParamName);
+                        if (arg is IdentifierExpr wordArg && ctx.Symbols.IsWordVar(wordArg.Name))
+                        {
+                            // Pass word variable by value
+                            var srcZp = ctx.Symbols.GetLocal(wordArg.Name);
+                            ctx.Buffer.EmitLdaZeroPage(srcZp);
+                            ctx.Buffer.EmitStaZeroPage(paramZp);
+                            ctx.Buffer.EmitLdaZeroPage((byte)(srcZp + 1));
+                            ctx.Buffer.EmitStaZeroPage((byte)(paramZp + 1));
+                        }
+                        else
+                        {
+                            // Literal or constant expression
+                            var val = ExpressionEmitter.Resolve16BitInitializer(param.TypeName, arg);
+                            ctx.Buffer.EmitLdaImmediate((byte)(val & 0xFF));
+                            ctx.Buffer.EmitStaZeroPage(paramZp);
+                            ctx.Buffer.EmitLdaImmediate((byte)(val >> 8));
+                            ctx.Buffer.EmitStaZeroPage((byte)(paramZp + 1));
+                        }
+                    }
                     else
                     {
-                        // Regular byte/word parameter
+                        // Regular byte parameter
                         ctx.Expressions.EmitExprToA(arg);
                         ctx.Buffer.EmitStaZeroPage(ctx.Symbols.GetLocal(param.ParamName));
                     }

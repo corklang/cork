@@ -1,0 +1,88 @@
+// Test: standard library functions
+import "../stdlib/math.cork";
+import "../stdlib/screen.cork";
+import "../stdlib/print.cork";
+import "../stdlib/random.cork";
+import "../stdlib/memory.cork";
+import "../stdlib/input.cork";
+import "../stdlib/sprite.cork";
+
+entry scene Test {
+    hardware {
+        border: Color.darkGrey;
+        background: Color.black;
+    }
+
+    enter {
+        clearScreen:;
+
+        // Print labels + results on separate lines
+        printAt: 0 text: "STDLIB TEST";
+
+        // Math: abs(214) = 42 (214 = unsigned -42)
+        printAt: 80 text: "ABS=";
+        byte absResult = (abs: 214);
+        printByte: absResult at: 0x0454;
+
+        // Math: min/max
+        printAt: 120 text: "MIN=";
+        byte mn = (min: 200 and: 50);
+        printByte: mn at: 0x047C;
+        printAt: 131 text: "MAX=";
+        byte mx = (max: 200 and: 50);
+        printByte: mx at: 0x0487;
+
+        // Math: clamp
+        printAt: 160 text: "CLAMP=";
+        byte cl = (clamp: 250 low: 10 high: 100);
+        printByte: cl at: 0x04A6;
+
+        // Print: hex
+        printAt: 200 text: "HEX=";
+        printHex: 0xFF at: 0x04CC;
+        printHex: 0x42 at: 0x04CF;
+
+        // Random
+        printAt: 240 text: "RND=";
+        printByte: (randomRange: 100) at: 0x04F4;
+
+        // Box
+        drawBox: 0 y1: 8 x2: 39 y2: 12;
+        printAt: 362 text: "FIRE TO CONTINUE";
+
+        // memset bottom row
+        memset: 0x07C0 length: 40 value: 160;
+    }
+
+    frame {
+        // Show changing random value
+        printByte: (randomRange: 100) at: 0x04F8;
+        if (joystick.port2.fire) { go Scene2; }
+    }
+}
+
+scene Scene2 {
+    hardware { border: Color.blue; background: Color.blue; }
+    enter {
+        clearScreen:;
+        printAt: 492 text: "SCENE 2 - SPRITES";
+        enableSprite: 0;
+        setSpriteColor: 0 color: Color.white;
+        setSpritePos: 0 x: 172 y: 150;
+        setSpriteFrame: 0 ptr: 13;
+    }
+    frame {
+        if (joystick.port2.fire) { go Test; }
+    }
+}
+
+const byte spritePtr = 13;
+const byte[63] spriteData = {
+    0x00, 0x7E, 0x00, 0x01, 0xFF, 0x80, 0x07, 0xFF, 0xE0,
+    0x0F, 0xFF, 0xF0, 0x1F, 0xFF, 0xF8, 0x3F, 0xFF, 0xFC,
+    0x3F, 0xFF, 0xFC, 0x7F, 0xFF, 0xFE, 0x7F, 0xFF, 0xFE,
+    0x7F, 0xFF, 0xFE, 0x7F, 0xFF, 0xFE, 0x7F, 0xFF, 0xFE,
+    0x3F, 0xFF, 0xFC, 0x3F, 0xFF, 0xFC, 0x1F, 0xFF, 0xF8,
+    0x0F, 0xFF, 0xF0, 0x07, 0xFF, 0xE0, 0x01, 0xFF, 0x80,
+    0x00, 0x7E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};

@@ -1,0 +1,131 @@
+// Cork Standard Library: Screen
+// import "../stdlib/screen.cork";
+
+// Clear the screen (fill with spaces, reset color to light blue)
+clearScreen: {
+    byte _i = 0;
+    while (_i < 250) {
+        poke: (0x0400 + _i) value: 32;
+        poke: (0x04FA + _i) value: 32;
+        poke: (0x05F4 + _i) value: 32;
+        poke: (0x06EE + _i) value: 32;
+        poke: (0xD800 + _i) value: 14;
+        poke: (0xD8FA + _i) value: 14;
+        poke: (0xD9F4 + _i) value: 14;
+        poke: (0xDAEE + _i) value: 14;
+        _i += 1;
+    }
+}
+
+// Fill screen with a character
+fillScreen: (byte _ch) {
+    byte _i = 0;
+    while (_i < 250) {
+        poke: (0x0400 + _i) value: _ch;
+        poke: (0x04FA + _i) value: _ch;
+        poke: (0x05F4 + _i) value: _ch;
+        poke: (0x06EE + _i) value: _ch;
+        _i += 1;
+    }
+}
+
+// Fill screen color RAM with a single color
+fillColor: (byte _col) {
+    byte _i = 0;
+    while (_i < 250) {
+        poke: (0xD800 + _i) value: _col;
+        poke: (0xD8FA + _i) value: _col;
+        poke: (0xD9F4 + _i) value: _col;
+        poke: (0xDAEE + _i) value: _col;
+        _i += 1;
+    }
+}
+
+// Set a character at row, column with color
+setChar: (byte _row) col: (byte _col) char: (byte _ch) color: (byte _clr) {
+    word _pos = _row * 40;
+    _pos += _col;
+    poke: (0x0400 + _pos) value: _ch;
+    poke: (0xD800 + _pos) value: _clr;
+}
+
+// Fill a horizontal line with a character
+hline: (byte _row) from: (byte _x1) to: (byte _x2) char: (byte _ch) {
+    word _addr = _row * 40;
+    _addr += 0x0400;
+    _addr += _x1;
+    byte _count = _x2 - _x1;
+    byte _i = 0;
+    while (_i <= _count) {
+        poke: _addr value: _ch;
+        _addr += 1;
+        _i += 1;
+    }
+}
+
+// Fill a vertical line with a character
+vline: (byte _col) from: (byte _y1) to: (byte _y2) char: (byte _ch) {
+    word _addr = _y1 * 40;
+    _addr += 0x0400;
+    _addr += _col;
+    byte _i = _y1;
+    while (_i <= _y2) {
+        poke: _addr value: _ch;
+        _addr += 40;
+        _i += 1;
+    }
+}
+
+// Draw a box outline using PETSCII box characters
+drawBox: (byte _x1) y1: (byte _y1) x2: (byte _x2) y2: (byte _y2) {
+    hline: _y1 from: _x1 to: _x2 char: 64;
+    hline: _y2 from: _x1 to: _x2 char: 64;
+    vline: _x1 from: _y1 to: _y2 char: 66;
+    vline: _x2 from: _y1 to: _y2 char: 66;
+    setChar: _y1 col: _x1 char: 112 color: 14;
+    setChar: _y1 col: _x2 char: 110 color: 14;
+    setChar: _y2 col: _x1 char: 109 color: 14;
+    setChar: _y2 col: _x2 char: 125 color: 14;
+}
+
+// Scroll screen up by one row
+scrollUp: {
+    word _src = 0x0428;
+    word _dst = 0x0400;
+    word _csrc = 0xD828;
+    word _cdst = 0xD800;
+    byte _i = 0;
+    while (_i < 240) {
+        poke: _dst value: (peek: _src);
+        poke: _cdst value: (peek: _csrc);
+        _src += 1;
+        _dst += 1;
+        _csrc += 1;
+        _cdst += 1;
+        poke: _dst value: (peek: _src);
+        poke: _cdst value: (peek: _csrc);
+        _src += 1;
+        _dst += 1;
+        _csrc += 1;
+        _cdst += 1;
+        poke: _dst value: (peek: _src);
+        poke: _cdst value: (peek: _csrc);
+        _src += 1;
+        _dst += 1;
+        _csrc += 1;
+        _cdst += 1;
+        poke: _dst value: (peek: _src);
+        poke: _cdst value: (peek: _csrc);
+        _src += 1;
+        _dst += 1;
+        _csrc += 1;
+        _cdst += 1;
+        _i += 1;
+    }
+    _i = 0;
+    while (_i < 40) {
+        poke: (0x07C0 + _i) value: 32;
+        poke: (0xDBC0 + _i) value: 14;
+        _i += 1;
+    }
+}

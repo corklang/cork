@@ -1,0 +1,34 @@
+// Cork Standard Library: Random Numbers
+// import "../stdlib/random.cork";
+//
+// Note: the SID noise channel is auto-initialized when random: is used.
+
+// Random byte in range [0, max)
+byte randomRange: (byte _max) {
+    byte _r = (random:);
+    _r %= _max;
+    return _r;
+}
+
+// Random byte in range [lo, hi] inclusive
+byte randomBetween: (byte _lo) and: (byte _hi) {
+    byte _range = _hi - _lo;
+    _range += 1;
+    byte _r = (random:);
+    _r %= _range;
+    return _r + _lo;
+}
+
+// Random boolean (1 roughly 50% of the time)
+byte randomBool: {
+    byte _r = (random:);
+    return _r & 1;
+}
+
+// Random chance: returns 1 with probability chance/256
+// chance: 0=never, 128=50%, 255=almost always
+byte randomChance: (byte _chance) {
+    byte _r = (random:);
+    if (_r < _chance) { return 1; }
+    return 0;
+}
