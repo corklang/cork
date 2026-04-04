@@ -178,6 +178,14 @@ public sealed record ReturnStmt(
     SourceLocation Location
 ) : StmtNode(Location);
 
+public sealed record ForStmt(
+    StmtNode Init,
+    ExprNode Condition,
+    StmtNode Step,
+    BlockNode Body,
+    SourceLocation Location
+) : StmtNode(Location);
+
 public sealed record GoStmt(
     string SceneName,
     SourceLocation Location

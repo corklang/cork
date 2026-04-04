@@ -1,0 +1,45 @@
+// Feature: for loops, break, continue
+
+entry scene Demo {
+    hardware {
+        border: Color.blue;
+        background: Color.black;
+    }
+
+    enter {
+        // Fill screen with character pattern using for loop
+        for (byte i = 0; i < 250; i += 1) {
+            poke: 0x0400 + i value: i;
+            poke: 0x04FA + i value: i;
+            poke: 0x05F4 + i value: i;
+            poke: 0x06EE + i value: i;
+        }
+    }
+
+    byte colorIdx = 0;
+
+    frame {
+        // Cycle border color slowly
+        colorIdx += 1;
+        if (colorIdx == 8) {
+            colorIdx = 0;
+        }
+
+        // Clear the row, then draw up to colorIdx using break
+        for (byte x = 0; x < 40; x += 1) {
+            poke: 0x0400 + x value: 32;
+        }
+        for (byte x = 0; x < 40; x += 1) {
+            if (x == colorIdx) { break; }
+            poke: 0x0400 + x value: 160;
+        }
+
+        // Skip odd positions with continue
+        for (byte x = 0; x < 40; x += 1) {
+            poke: 0x07C0 + x value: 32;
+        }
+        for (byte x = 0; x < 40; x += 2) {
+            poke: 0x07C0 + x value: 81;
+        }
+    }
+}

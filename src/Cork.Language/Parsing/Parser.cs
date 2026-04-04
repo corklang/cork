@@ -399,6 +399,7 @@ public sealed class Parser(List<Token> tokens)
     private StmtNode ParseStatement()
     {
         if (Check(TokenKind.WhileKw)) return ParseWhile();
+        if (Check(TokenKind.ForKw)) return ParseFor();
         if (Check(TokenKind.IfKw)) return ParseIf();
         if (Check(TokenKind.ReturnKw)) return ParseReturn();
         if (Check(TokenKind.GoKw)) return ParseGo();
@@ -415,6 +416,52 @@ public sealed class Parser(List<Token> tokens)
 
         // Expression-based: could be assignment or message send
         return ParseExpressionStatement();
+    }
+
+    private ForStmt ParseFor()
+    {
+        var loc = CurrentLocation;
+        Expect(TokenKind.ForKw, "for");
+        Expect(TokenKind.OpenParen, "(");
+
+        // Init: variable declaration (without semicolon parsed by ParseLocalVarDecl, we handle ; here)
+        var init = ParseLocalVarDeclForInit();
+        Expect(TokenKind.Semicolon, ";");
+
+        // Condition
+        var condition = ParseExpression();
+        Expect(TokenKind.Semicolon, ";");
+
+        // Step: assignment like i += 1
+        var step = ParseForStep();
+
+        Expect(TokenKind.CloseParen, ")");
+        var body = ParseBlock();
+        return new ForStmt(init, condition, step, body, loc);
+    }
+
+    private StmtNode ParseLocalVarDeclForInit()
+    {
+        var loc = CurrentLocation;
+        var typeName = Advance().Text; // type keyword
+        var name = Expect(TokenKind.Identifier, "name").Text;
+        ExprNode? init = null;
+        if (TryConsume(TokenKind.Equal))
+            init = ParseExpression();
+        return new VarDeclStmt(typeName, name, init, loc);
+    }
+
+    private StmtNode ParseForStep()
+    {
+        var loc = CurrentLocation;
+        var expr = ParsePostfix(ParsePrimary());
+        if (IsAssignmentOp(Current.Kind))
+        {
+            var op = Advance().Kind;
+            var value = ParseExpression();
+            return new AssignmentStmt(expr, op, value, loc);
+        }
+        throw Error("Expected assignment in for step");
     }
 
     private WhileStmt ParseWhile()

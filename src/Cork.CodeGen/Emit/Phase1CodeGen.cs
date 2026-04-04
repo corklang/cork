@@ -151,6 +151,8 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         // ZP pointer for indirect indexed addressing
         private const byte ZpPointerLo = 0xFB;
         private const byte ZpPointerHi = 0xFC;
+        // Loop context for break/continue
+        private readonly Stack<(string BreakLabel, string ContinueLabel)> _loopStack = [];
 
         public void RegisterStructType(StructDeclNode structDecl)
         {
@@ -529,8 +531,11 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 case AssignmentStmt assign: EmitAssignment(assign); break;
                 case WhileStmt whileStmt: EmitWhile(whileStmt); break;
                 case IfStmt ifStmt: EmitIf(ifStmt); break;
+                case ForStmt forStmt: EmitFor(forStmt); break;
                 case MessageSendStmt msgSend: EmitMessageSend(msgSend); break;
                 case GoStmt goStmt: Buffer.EmitJmpForward($"_scene_{goStmt.SceneName}"); break;
+                case BreakStmt: EmitBreak(); break;
+                case ContinueStmt: EmitContinue(); break;
                 default: throw new InvalidOperationException($"Unsupported statement: {stmt.GetType().Name}");
             }
         }
@@ -637,19 +642,60 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             var loopLabel = NextLabel("wloop");
             var endLabel = NextLabel("wend");
 
-            Buffer.DefineLabel(loopLabel);
+            _loopStack.Push((endLabel, loopLabel));
 
-            // Emit condition: branch-if-true skips over the JMP-to-end (3 bytes)
+            Buffer.DefineLabel(loopLabel);
             EmitConditionBranchTrue(whileStmt.Condition, 3);
+            Buffer.EmitJmpForward(endLabel);
+            EmitBlock(whileStmt.Body);
+            Buffer.EmitJmpAbsolute(Buffer.GetLabel(loopLabel));
+            Buffer.DefineLabel(endLabel);
+
+            _loopStack.Pop();
+        }
+
+        private void EmitFor(ForStmt forStmt)
+        {
+            var loopLabel = NextLabel("floop");
+            var stepLabel = NextLabel("fstep");
+            var endLabel = NextLabel("fend");
+
+            // Init
+            EmitStatement(forStmt.Init);
+
+            _loopStack.Push((endLabel, stepLabel));
+
+            // Condition
+            Buffer.DefineLabel(loopLabel);
+            EmitConditionBranchTrue(forStmt.Condition, 3);
             Buffer.EmitJmpForward(endLabel);
 
             // Body
-            EmitBlock(whileStmt.Body);
+            EmitBlock(forStmt.Body);
 
-            // Back to top
+            // Step
+            Buffer.DefineLabel(stepLabel);
+            EmitStatement(forStmt.Step);
+
+            // Back to condition
             Buffer.EmitJmpAbsolute(Buffer.GetLabel(loopLabel));
-
             Buffer.DefineLabel(endLabel);
+
+            _loopStack.Pop();
+        }
+
+        private void EmitBreak()
+        {
+            if (_loopStack.Count == 0)
+                throw new InvalidOperationException("break outside of loop");
+            Buffer.EmitJmpForward(_loopStack.Peek().BreakLabel);
+        }
+
+        private void EmitContinue()
+        {
+            if (_loopStack.Count == 0)
+                throw new InvalidOperationException("continue outside of loop");
+            Buffer.EmitJmpForward(_loopStack.Peek().ContinueLabel);
         }
 
         private void EmitIf(IfStmt ifStmt)
