@@ -186,9 +186,18 @@ public sealed class ExpressionEmitter(EmitContext ctx)
     public bool TryResolveStructField(MemberAccessExpr member, out byte zpAddr)
     {
         zpAddr = 0;
+        // Direct field: hero.health
         if (member.Receiver is IdentifierExpr ident &&
             ctx.Symbols.TryGetStructInstance(ident.Name, out var instance) &&
             instance.Fields.TryGetValue(member.MemberName, out zpAddr))
+        {
+            return true;
+        }
+        // Nested field chain: hero.pos.x → look up "hero" instance, key "pos.x"
+        if (member.Receiver is MemberAccessExpr nested &&
+            nested.Receiver is IdentifierExpr rootIdent &&
+            ctx.Symbols.TryGetStructInstance(rootIdent.Name, out var rootInst) &&
+            rootInst.Fields.TryGetValue($"{nested.MemberName}.{member.MemberName}", out zpAddr))
         {
             return true;
         }

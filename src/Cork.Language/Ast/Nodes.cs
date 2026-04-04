@@ -114,6 +114,13 @@ public sealed record FrameBlockNode(
     SourceLocation Location
 ) : SceneMemberNode(Location);
 
+public sealed record SpriteBlockNode(
+    string Name,
+    int SpriteIndex,    // 0-7, auto-assigned
+    List<HardwareSetting> Settings,
+    SourceLocation Location
+) : SceneMemberNode(Location);
+
 public sealed record RasterBlockNode(
     int Line,
     BlockNode Body,

@@ -1,0 +1,38 @@
+// Feature: string type — fixed-size PETSCII strings
+
+// printAt: writes a string to screen RAM at a given position
+printAt: (byte pos) text: (byte textAddr) length: (byte len) {
+    for (byte i = 0; i < len; i += 1) {
+        // For now, use poke with the const array
+    }
+}
+
+entry scene Demo {
+    hardware {
+        border: Color.blue;
+        background: Color.black;
+    }
+
+    enter {
+        // Display text using const arrays (string-like)
+        byte col = 0;
+        for (ch in greeting) {
+            poke: 0x05CF + col value: ch;
+            col += 1;
+        }
+
+        col = 0;
+        for (ch in subtitle) {
+            poke: 0x0617 + col value: ch;
+            col += 1;
+        }
+    }
+
+    frame {
+    }
+}
+
+// Screen codes for "HELLO CORK!"
+const byte[11] greeting = { 8, 5, 12, 12, 15, 32, 3, 15, 18, 11, 33 };
+// Screen codes for "A C64 LANGUAGE"
+const byte[14] subtitle = { 1, 32, 3, 54, 52, 32, 12, 1, 14, 7, 21, 1, 7, 5 };

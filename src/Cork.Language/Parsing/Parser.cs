@@ -3,9 +3,11 @@ namespace Cork.Language.Parsing;
 using Cork.Language.Ast;
 using Cork.Language.Lexing;
 
-public sealed class Parser(List<Token> tokens)
+public sealed class Parser(List<Token> tokens, string basePath = ".")
 {
     private int _pos;
+
+    private readonly HashSet<string> _importedFiles = [];
 
     public ProgramNode ParseProgram()
     {
@@ -14,6 +16,33 @@ public sealed class Parser(List<Token> tokens)
 
         while (!IsAtEnd)
         {
+            // Handle imports by parsing the imported file and splicing declarations
+            if (Check(TokenKind.ImportKw))
+            {
+                Advance(); // consume 'import'
+                var pathToken = Expect(TokenKind.StringLiteral, "import path");
+                Expect(TokenKind.Semicolon, ";");
+
+                var importPath = (string)pathToken.LiteralValue!;
+                var fullPath = Path.Combine(basePath, importPath);
+                var normalizedPath = Path.GetFullPath(fullPath);
+
+                // Prevent double imports
+                if (!_importedFiles.Add(normalizedPath)) continue;
+
+                if (!File.Exists(fullPath))
+                    throw Error($"Import file not found: {importPath}");
+
+                var importSource = File.ReadAllText(fullPath);
+                var importLexer = new Lexing.Lexer(importSource, fullPath);
+                var importTokens = importLexer.Tokenize();
+                var importParser = new Parser(importTokens, Path.GetDirectoryName(fullPath) ?? ".");
+                var importProgram = importParser.ParseProgram();
+
+                declarations.AddRange(importProgram.Declarations);
+                continue;
+            }
+
             declarations.Add(ParseTopLevel());
         }
 
@@ -133,8 +162,9 @@ public sealed class Parser(List<Token> tokens)
             {
                 methods.Add(ParseStructMethod());
             }
-            // Field: type name [= expr];
-            else if (IsTypeKeyword(Current.Kind))
+            // Field: type name [= expr]; (primitive or struct type)
+            else if (IsTypeKeyword(Current.Kind) ||
+                     (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Identifier) && !PeekIs(2, TokenKind.Colon)))
             {
                 var fieldLoc = CurrentLocation;
                 var typeName = Advance().Text;
@@ -275,6 +305,8 @@ public sealed class Parser(List<Token> tokens)
             return ParseExitBlock();
         if (Check(TokenKind.RasterKw))
             return ParseRasterBlock();
+        if (Check(TokenKind.SpriteKw))
+            return ParseSpriteBlock();
 
         // Scene-local const
         if (Check(TokenKind.ConstKw))
@@ -371,6 +403,30 @@ public sealed class Parser(List<Token> tokens)
     }
 
     private bool _nextIsConst;
+
+    private static int _spriteCounter;
+
+    private SpriteBlockNode ParseSpriteBlock()
+    {
+        var loc = CurrentLocation;
+        Expect(TokenKind.SpriteKw, "sprite");
+        var name = Expect(TokenKind.Identifier, "sprite name").Text;
+        Expect(TokenKind.OpenBrace, "{");
+
+        var settings = new List<HardwareSetting>();
+        while (!Check(TokenKind.CloseBrace) && !IsAtEnd)
+        {
+            var settingLoc = CurrentLocation;
+            var settingName = Expect(TokenKind.Identifier, "setting name").Text;
+            Expect(TokenKind.Colon, ":");
+            var value = ParseExpression();
+            Expect(TokenKind.Semicolon, ";");
+            settings.Add(new HardwareSetting(settingName, value, settingLoc));
+        }
+
+        Expect(TokenKind.CloseBrace, "}");
+        return new SpriteBlockNode(name, _spriteCounter++, settings, loc);
+    }
 
     private SceneVarDeclNode ParseSceneVarDecl()
     {

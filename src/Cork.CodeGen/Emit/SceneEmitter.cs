@@ -50,6 +50,10 @@ public sealed class SceneEmitter(EmitContext ctx)
                 EmitSceneVar(varDecl);
 
         foreach (var member in scene.Members)
+            if (member is SpriteBlockNode sprite)
+                EmitSpriteBlock(sprite);
+
+        foreach (var member in scene.Members)
             if (member is EnterBlockNode enter)
                 ctx.Statements.EmitBlock(enter.Body);
 
@@ -131,20 +135,9 @@ public sealed class SceneEmitter(EmitContext ctx)
                 return;
             }
 
-            // Single struct instance
+            // Single struct instance (supports nested structs)
             var singleFieldMap = new Dictionary<string, byte>();
-            foreach (var field in structType.Fields)
-            {
-                var fieldZpName = $"{decl.Name}${field.Name}";
-                var zp = ctx.Symbols.AllocZeroPage(fieldZpName);
-                singleFieldMap[field.Name] = zp;
-
-                if (field.DefaultValue is IntLiteralExpr intLit)
-                    ctx.Buffer.EmitLdaImmediate((byte)intLit.Value);
-                else
-                    ctx.Buffer.EmitLdaImmediate(0);
-                ctx.Buffer.EmitStaZeroPage(zp);
-            }
+            AllocStructFields(decl.Name, structType, singleFieldMap);
             ctx.Symbols.RegisterStructInstance(decl.Name, decl.TypeName, singleFieldMap);
             return;
         }
@@ -154,29 +147,128 @@ public sealed class SceneEmitter(EmitContext ctx)
         {
             if (ctx.Symbols.TryGetStructType(structInit.TypeName, out var initStructType))
             {
+                // Allocate all fields (including nested structs) with defaults
                 var fieldMap = new Dictionary<string, byte>();
-                foreach (var field in initStructType.Fields)
-                {
-                    var fieldZpName = $"{decl.Name}${field.Name}";
-                    var zp = ctx.Symbols.AllocZeroPage(fieldZpName);
-                    fieldMap[field.Name] = zp;
+                AllocStructFields(decl.Name, initStructType, fieldMap);
 
-                    // Check if this field has an override in the initializer
-                    var overrideInit = structInit.FieldInits.Find(f => f.FieldName == field.Name);
-                    if (overrideInit != default)
-                        ctx.Expressions.EmitExprToA(overrideInit.Value);
-                    else if (field.DefaultValue is IntLiteralExpr defLit)
-                        ctx.Buffer.EmitLdaImmediate((byte)defLit.Value);
-                    else
-                        ctx.Buffer.EmitLdaImmediate(0);
-                    ctx.Buffer.EmitStaZeroPage(zp);
+                // Apply overrides from the initializer
+                foreach (var (fieldName, value) in structInit.FieldInits)
+                {
+                    if (value is StructInitExpr nestedInit)
+                    {
+                        // Nested struct init: pos = Position { x = 20, y = 12 }
+                        foreach (var (nf, nv) in nestedInit.FieldInits)
+                        {
+                            var key = $"{fieldName}.{nf}";
+                            if (fieldMap.TryGetValue(key, out var nestedZp))
+                            {
+                                ctx.Expressions.EmitExprToA(nv);
+                                ctx.Buffer.EmitStaZeroPage(nestedZp);
+                            }
+                        }
+                    }
+                    else if (fieldMap.TryGetValue(fieldName, out var zp))
+                    {
+                        ctx.Expressions.EmitExprToA(value);
+                        ctx.Buffer.EmitStaZeroPage(zp);
+                    }
                 }
+
                 ctx.Symbols.RegisterStructInstance(decl.Name, structInit.TypeName, fieldMap);
                 return;
             }
         }
 
         ctx.Statements.EmitTypedVarInit(decl.TypeName, decl.Name, decl.Initializer);
+    }
+
+    private void EmitSpriteBlock(SpriteBlockNode sprite)
+    {
+        var idx = sprite.SpriteIndex;
+
+        // Allocate ZP for x and y so they can be modified later
+        var xZp = ctx.Symbols.AllocZeroPage($"{sprite.Name}$x");
+        var yZp = ctx.Symbols.AllocZeroPage($"{sprite.Name}$y");
+
+        // Register as a pseudo struct instance so sprite.x and sprite.y work
+        var fieldMap = new Dictionary<string, byte> { ["x"] = xZp, ["y"] = yZp };
+        ctx.Symbols.RegisterStructInstance(sprite.Name, "_sprite", fieldMap);
+
+        byte initX = 0, initY = 0, color = 1;
+        string? dataRef = null;
+
+        foreach (var setting in sprite.Settings)
+        {
+            var val = setting.Value;
+            switch (setting.Name)
+            {
+                case "x": initX = ctx.Expressions.EvalConstExpr(val); break;
+                case "y": initY = ctx.Expressions.EvalConstExpr(val); break;
+                case "color": color = ctx.Expressions.EvalConstExpr(val); break;
+                case "data":
+                    if (val is IdentifierExpr dataIdent)
+                        dataRef = dataIdent.Name;
+                    break;
+            }
+        }
+
+        // Initialize ZP variables
+        ctx.Buffer.EmitLdaImmediate(initX);
+        ctx.Buffer.EmitStaZeroPage(xZp);
+        ctx.Buffer.EmitLdaImmediate(initY);
+        ctx.Buffer.EmitStaZeroPage(yZp);
+
+        // Write VIC-II registers
+        ctx.Buffer.EmitLdaImmediate(initX);
+        ctx.Buffer.EmitStaAbsolute((ushort)(0xD000 + idx * 2));     // sprite X
+        ctx.Buffer.EmitLdaImmediate(initY);
+        ctx.Buffer.EmitStaAbsolute((ushort)(0xD001 + idx * 2));     // sprite Y
+        ctx.Buffer.EmitLdaImmediate(color);
+        ctx.Buffer.EmitStaAbsolute((ushort)(0xD027 + idx));         // sprite color
+
+        // Set sprite pointer (data reference)
+        if (dataRef != null && ctx.Symbols.TryGetConstant($"{dataRef[..^4]}Ptr", out var ptrVal))
+        {
+            // Convention: spriteData → spritePtr
+            ctx.Buffer.EmitLdaImmediate((byte)ptrVal);
+            ctx.Buffer.EmitStaAbsolute((ushort)(0x07F8 + idx));
+        }
+
+        // Enable sprite bit
+        ctx.Buffer.EmitLdaAbsolute(0xD015);
+        ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte((byte)(1 << idx)); // ORA #bit
+        ctx.Buffer.EmitStaAbsolute(0xD015);
+    }
+
+    private void AllocStructFields(string prefix, StructDeclNode structType, Dictionary<string, byte> fieldMap)
+    {
+        foreach (var field in structType.Fields)
+        {
+            // Check if field type is itself a struct (composition)
+            if (ctx.Symbols.TryGetStructType(field.TypeName, out var nestedStruct))
+            {
+                // Recursively allocate nested struct fields with dotted prefix
+                var nestedMap = new Dictionary<string, byte>();
+                AllocStructFields($"{prefix}${field.Name}", nestedStruct, nestedMap);
+                // Register the nested struct as a sub-instance so hero.pos.x resolves
+                ctx.Symbols.RegisterStructInstance($"{prefix}.{field.Name}", field.TypeName, nestedMap);
+                // Also put in parent map with dotted key for direct field resolution
+                foreach (var (k, v) in nestedMap)
+                    fieldMap[$"{field.Name}.{k}"] = v;
+            }
+            else
+            {
+                var fieldZpName = $"{prefix}${field.Name}";
+                var zp = ctx.Symbols.AllocZeroPage(fieldZpName);
+                fieldMap[field.Name] = zp;
+
+                if (field.DefaultValue is IntLiteralExpr intLit)
+                    ctx.Buffer.EmitLdaImmediate((byte)intLit.Value);
+                else
+                    ctx.Buffer.EmitLdaImmediate(0);
+                ctx.Buffer.EmitStaZeroPage(zp);
+            }
+        }
     }
 
     public void EmitSceneMethod(SceneMethodNode method)

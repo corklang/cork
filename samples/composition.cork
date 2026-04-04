@@ -1,0 +1,42 @@
+// Feature: struct composition — structs containing other structs
+
+struct Position {
+    byte x = 0;
+    byte y = 0;
+}
+
+struct Enemy {
+    Position pos;
+    byte health = 3;
+    byte active = 1;
+}
+
+entry scene Demo {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+    }
+
+    var hero = Enemy { pos = Position { x = 20, y = 12 }, health = 5 };
+
+    enter {
+        // Access nested fields
+        poke: 0xD020 value: hero.health;
+
+        // Draw at position using nested field access
+        // hero.pos.x gives us the x coordinate
+        poke: 0x0400 + hero.pos.x value: 81;
+    }
+
+    frame {
+        // Move hero
+        if (joystick.port2.right) { hero.pos.x += 1; }
+        if (joystick.port2.left)  { hero.pos.x -= 1; }
+
+        // Redraw
+        for (byte i = 0; i < 40; i += 1) {
+            poke: 0x0400 + i value: 32;
+        }
+        poke: 0x0400 + hero.pos.x value: 81;
+    }
+}

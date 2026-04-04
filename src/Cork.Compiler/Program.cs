@@ -33,7 +33,7 @@ try
     Console.WriteLine($"  Lexed {tokens.Count} tokens");
 
     // Parse
-    var parser = new Parser(tokens);
+    var parser = new Parser(tokens, Path.GetDirectoryName(Path.GetFullPath(sourcePath)) ?? ".");
     var program = parser.ParseProgram();
     Console.WriteLine($"  Parsed {program.Declarations.Count} top-level declarations");
 

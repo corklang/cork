@@ -1,0 +1,26 @@
+// Feature: import — include another cork file's declarations
+
+import "lib/clearscreen.cork";
+
+entry scene Demo {
+    hardware {
+        border: Color.blue;
+        background: Color.black;
+    }
+
+    enter {
+        clearScreen:;
+
+        // Write something on the clean screen
+        byte col = 0;
+        for (ch in message) {
+            poke: 0x05CF + col value: ch;
+            col += 1;
+        }
+    }
+
+    frame {
+    }
+}
+
+const byte[8] message = { 9, 13, 16, 15, 18, 20, 19, 33 };
