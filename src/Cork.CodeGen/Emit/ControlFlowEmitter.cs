@@ -296,27 +296,15 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
 
     public void EmitConditionBranchTrue(ExprNode condition, int skipBytes)
     {
-        // Sprite collision: player collidedWith: enemy
+        // Sprite-sprite collision: player collidedWith: enemy
         if (condition is MessageSendExpr { Segments: [{ Name: "collidedWith" }] } collMsg &&
             collMsg.Receiver is IdentifierExpr collReceiver &&
             collMsg.Segments[0].Argument is IdentifierExpr collTarget)
         {
-            // Read $D01E (sprite-sprite collision), AND with both sprites' bits
-            ctx.Symbols.TryGetSpriteSync(
-                ctx.Symbols.GetLocal($"{collReceiver.Name}$x"), out _);
-            ctx.Symbols.TryGetSpriteSync(
-                ctx.Symbols.GetLocal($"{collTarget.Name}$x"), out _);
-
-            // Get sprite indices from the sync registrations
-            var recvXZp = ctx.Symbols.GetLocal($"{collReceiver.Name}$x");
-            var targXZp = ctx.Symbols.GetLocal($"{collTarget.Name}$x");
-            ctx.Symbols.TryGetSpriteSync(recvXZp, out var recvReg);
-            ctx.Symbols.TryGetSpriteSync(targXZp, out var targReg);
-            var recvIdx = (recvReg - 0xD000) / 2;
-            var targIdx = (targReg - 0xD000) / 2;
+            var recvIdx = GetSpriteIndex(collReceiver.Name);
+            var targIdx = GetSpriteIndex(collTarget.Name);
             var mask = (byte)((1 << recvIdx) | (1 << targIdx));
 
-            // LDA $D01E; AND #mask; CMP #mask; BEQ +skipBytes (both bits set = collision)
             ctx.Buffer.EmitLdaAbsolute(0xD01E);
             ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(mask); // AND #mask
             ctx.Buffer.EmitCmpImmediate(mask);
@@ -324,9 +312,22 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             return;
         }
 
-        if (IsJoystickCheck(condition, out var bitMask))
+        // Sprite-background collision: player collidedWithBackground:
+        if (condition is MessageSendExpr { Segments: [{ Name: "collidedWithBackground" }] } bgCollMsg &&
+            bgCollMsg.Receiver is IdentifierExpr bgCollReceiver)
         {
-            ctx.Buffer.EmitLdaAbsolute(0xDC00);
+            var sprIdx = GetSpriteIndex(bgCollReceiver.Name);
+            var mask = (byte)(1 << sprIdx);
+
+            ctx.Buffer.EmitLdaAbsolute(0xD01F);
+            ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(mask); // AND #mask
+            ctx.Buffer.EmitBne((sbyte)skipBytes); // BNE = bit set = collision
+            return;
+        }
+
+        if (IsJoystickCheck(condition, out var bitMask, out var ciaAddr))
+        {
+            ctx.Buffer.EmitLdaAbsolute(ciaAddr);
             ctx.Buffer.EmitByte(0x29);
             ctx.Buffer.EmitByte(bitMask);
             ctx.Buffer.EmitBeq((sbyte)skipBytes);
@@ -417,11 +418,27 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
         throw new InvalidOperationException($"Unsupported condition: {condition.GetType().Name}");
     }
 
-    public static bool IsJoystickCheck(ExprNode expr, out byte bitMask)
+    private int GetSpriteIndex(string spriteName)
+    {
+        var xZp = ctx.Symbols.GetLocal($"{spriteName}$x");
+        ctx.Symbols.TryGetSpriteSync(xZp, out var reg);
+        return (reg - 0xD000) / 2;
+    }
+
+    public static bool IsJoystickCheck(ExprNode expr, out byte bitMask, out ushort ciaAddr)
     {
         bitMask = 0;
-        if (expr is MemberAccessExpr { Receiver: MemberAccessExpr { Receiver: IdentifierExpr { Name: "joystick" }, MemberName: "port2" } } outer)
+        ciaAddr = 0;
+        if (expr is MemberAccessExpr { Receiver: MemberAccessExpr { Receiver: IdentifierExpr { Name: "joystick" } } portAccess } outer)
         {
+            ciaAddr = portAccess.MemberName switch
+            {
+                "port1" => 0xDC01,
+                "port2" => 0xDC00,
+                _ => 0
+            };
+            if (ciaAddr == 0) return false;
+
             bitMask = outer.MemberName switch
             {
                 "up" => 0x01,

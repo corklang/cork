@@ -255,8 +255,8 @@ public sealed class SceneEmitter(EmitContext ctx)
         var idx = sprite.SpriteIndex;
         var bit = (byte)(1 << idx);
 
-        // Allocate ZP for mutable fields
-        var xZp = ctx.Symbols.AllocZeroPage($"{sprite.Name}$x");
+        // Allocate ZP for mutable fields (X is word for 9-bit position 0-511)
+        var xZp = ctx.Symbols.AllocWordZeroPage($"{sprite.Name}$x");
         var yZp = ctx.Symbols.AllocZeroPage($"{sprite.Name}$y");
 
         // Register as struct instance with auto-sync info
@@ -267,7 +267,8 @@ public sealed class SceneEmitter(EmitContext ctx)
         ctx.Symbols.RegisterSpriteSync(sprite.Name, idx, xZp, yZp);
 
         // Parse settings
-        byte initX = 0, initY = 0, color = 1;
+        ushort initX = 0;
+        byte initY = 0, color = 1;
         bool multicolor = false, expandX = false, expandY = false, priorityBack = false;
         string? dataRef = null;
 
@@ -275,7 +276,12 @@ public sealed class SceneEmitter(EmitContext ctx)
         {
             switch (setting.Name)
             {
-                case "x": initX = ctx.Expressions.EvalConstExpr(setting.Value); break;
+                case "x":
+                    if (ctx.Expressions.TryFoldConstant(setting.Value, out var xVal))
+                        initX = (ushort)xVal;
+                    else
+                        initX = ctx.Expressions.EvalConstExpr(setting.Value);
+                    break;
                 case "y": initY = ctx.Expressions.EvalConstExpr(setting.Value); break;
                 case "color": color = ctx.Expressions.EvalConstExpr(setting.Value); break;
                 case "multicolor": multicolor = setting.Value is BoolLiteralExpr { Value: true }; break;
@@ -293,19 +299,29 @@ public sealed class SceneEmitter(EmitContext ctx)
             }
         }
 
-        // Initialize ZP
-        ctx.Buffer.EmitLdaImmediate(initX);
+        // Initialize ZP (X is word: lo at xZp, hi at xZp+1)
+        ctx.Buffer.EmitLdaImmediate((byte)(initX & 0xFF));
         ctx.Buffer.EmitStaZeroPage(xZp);
+        ctx.Buffer.EmitLdaImmediate((byte)(initX >> 8));
+        ctx.Buffer.EmitStaZeroPage((byte)(xZp + 1));
         ctx.Buffer.EmitLdaImmediate(initY);
         ctx.Buffer.EmitStaZeroPage(yZp);
 
         // VIC-II register init
-        ctx.Buffer.EmitLdaImmediate(initX);
+        ctx.Buffer.EmitLdaImmediate((byte)(initX & 0xFF));
         ctx.Buffer.EmitStaAbsolute((ushort)(0xD000 + idx * 2));
         ctx.Buffer.EmitLdaImmediate(initY);
         ctx.Buffer.EmitStaAbsolute((ushort)(0xD001 + idx * 2));
         ctx.Buffer.EmitLdaImmediate(color);
         ctx.Buffer.EmitStaAbsolute((ushort)(0xD027 + idx));
+
+        // X MSB in $D010 (bit per sprite)
+        if (initX > 255)
+        {
+            ctx.Buffer.EmitLdaAbsolute(0xD010);
+            ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit); // ORA #bit
+            ctx.Buffer.EmitStaAbsolute(0xD010);
+        }
 
         // Sprite pointer
         if (dataRef != null)

@@ -141,6 +141,10 @@ public sealed class StatementEmitter(EmitContext ctx)
         else if (assign.Target is MemberAccessExpr member && ctx.Expressions.TryResolveStructField(member, out var fieldZp))
         {
             zp = fieldZp;
+            // Check if the resolved field is a word-width variable (e.g., sprite X position)
+            var fieldVarType = ctx.Symbols.GetVarTypeForZp(zp);
+            if (fieldVarType != null && SymbolTable.Is16BitType(fieldVarType))
+                varName = member.Receiver is IdentifierExpr ri ? $"{ri.Name}${member.MemberName}" : "";
         }
         // Indexed struct array field: enemies[0].x = 5;
         else if (assign.Target is MemberAccessExpr { Receiver: IndexExpr { Receiver: IdentifierExpr arrIdent, Index: IntLiteralExpr idxLit } } arrMember &&
@@ -163,6 +167,31 @@ public sealed class StatementEmitter(EmitContext ctx)
         if (varName != "" && ctx.Symbols.IsWordVar(varName))
         {
             EmitWordAssignment(zp, assign.Op, assign.Value);
+            // Sprite auto-sync for word X: write low byte + update MSB in $D010
+            if (ctx.Symbols.TryGetSpriteSync(zp, out var wordVicReg))
+            {
+                var sprIdx = (wordVicReg - 0xD000) / 2;
+                var sprBit = (byte)(1 << sprIdx);
+                // Write X low byte to VIC-II
+                ctx.Buffer.EmitLdaZeroPage(zp);
+                ctx.Buffer.EmitStaAbsolute(wordVicReg);
+                // Update MSB bit: check high byte, set or clear bit in $D010
+                var endLabel = ctx.NextLabel("_xmsb_end");
+                var setLabel = ctx.NextLabel("_xmsb_set");
+                ctx.Buffer.EmitLdaZeroPage((byte)(zp + 1));
+                // BNE → set path: skip clear(3+2=5) + JMP(3) = 8 bytes
+                ctx.Buffer.EmitBne(8);
+                // Clear bit: LDA $D010; AND #~bit; JMP end
+                ctx.Buffer.EmitLdaAbsolute(0xD010);
+                ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte((byte)~sprBit);
+                ctx.Buffer.EmitJmpForward(endLabel);
+                // Set bit: LDA $D010; ORA #bit
+                ctx.Buffer.EmitLdaAbsolute(0xD010);
+                ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(sprBit);
+                // Store result
+                ctx.Buffer.DefineLabel(endLabel);
+                ctx.Buffer.EmitStaAbsolute(0xD010);
+            }
             return;
         }
 
