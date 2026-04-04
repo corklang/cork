@@ -13,6 +13,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
     {
         // Dead code elimination: determine which globals are reachable from scenes
         var reachable = ReachabilityAnalysis.Analyze(program);
+        var usesRandom = reachable.Methods.Contains("random:");
 
         // Collect inline sprite patterns (separate from const data — aligned later)
         var inlineSprites = CollectInlineSpritePatterns(program);
@@ -55,7 +56,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
         // First pass: measure code size (sprite pointers registered as placeholder 0)
         var measuredSize = EmitAll(program, scenes, globalVars, dataNames, constArraySizes,
-            inlineSprites, reachable.Methods, codeBase, 0xFFFF).Length;
+            inlineSprites, reachable.Methods, usesRandom, codeBase, 0xFFFF).Length;
 
         // Second pass setup: compute data addresses
         var dataStart = (ushort)(codeBase + measuredSize);
@@ -66,7 +67,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         // Measure inline string data size (deterministic, same between passes)
         var measureCtx = CreateContext(codeBase, dataAddresses);
         RegisterAllTypes(measureCtx, program, globalVars, constArraySizes, inlineSprites, reachable.Methods);
-        EmitCode(measureCtx, program, scenes, globalVars, entryScene, reachable.Methods);
+        EmitCode(measureCtx, program, scenes, globalVars, entryScene, reachable.Methods, usesRandom);
         var measureInlineData = measureCtx.FinalizeInlineData(
             (ushort)(codeBase + measureCtx.Buffer.Length + constDataSize));
 
@@ -82,7 +83,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
             var ptrName = dataName.Replace("Data", "Ptr");
             ctx.Symbols.AddConstantNoShadowCheck(ptrName, spritePointers[dataName]);
         }
-        EmitCode(ctx, program, scenes, globalVars, entryScene, reachable.Methods);
+        EmitCode(ctx, program, scenes, globalVars, entryScene, reachable.Methods, usesRandom);
 
         // Finalize inline data (string literals)
         var codeSize = ctx.Buffer.Length;
@@ -146,12 +147,23 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
     private static void EmitCode(EmitContext ctx, ProgramNode program,
         List<SceneNode> scenes, List<GlobalVarDeclNode> globalVars, SceneNode entryScene,
-        HashSet<string>? reachableMethods = null)
+        HashSet<string>? reachableMethods = null, bool usesRandom = false)
     {
         ctx.Buffer.EmitSei();
         foreach (var gv in globalVars)
             EmitGlobalInit(ctx, gv);
         ctx.Intrinsics.EmitSpriteCopies(program, ctx.DataAddresses);
+
+        // SID noise setup for random: — voice 3 max frequency + noise waveform
+        if (usesRandom)
+        {
+            ctx.Buffer.EmitLdaImmediate(0xFF);
+            ctx.Buffer.EmitStaAbsolute(0xD40E); // Voice 3 freq lo
+            ctx.Buffer.EmitStaAbsolute(0xD40F); // Voice 3 freq hi
+            ctx.Buffer.EmitLdaImmediate(0x80);
+            ctx.Buffer.EmitStaAbsolute(0xD412); // Voice 3 control: noise waveform
+        }
+
         ctx.Buffer.EmitJmpForward($"_scene_{entryScene.Name}");
 
         foreach (var scene in scenes)
@@ -170,7 +182,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         List<GlobalVarDeclNode> globalVars, Dictionary<string, int> dataNames,
         Dictionary<string, int> constArraySizes,
         List<(string DataName, string SceneName, string SpriteName, byte[] Bytes)> inlineSprites,
-        HashSet<string> reachableMethods,
+        HashSet<string> reachableMethods, bool usesRandom,
         ushort codeBase, ushort dataStart)
     {
         var dataAddresses = new Dictionary<string, ushort>();
@@ -181,7 +193,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         RegisterAllTypes(ctx, program, globalVars, constArraySizes, inlineSprites, reachableMethods);
 
         var entryScene = scenes.First(s => s.IsEntry);
-        EmitCode(ctx, program, scenes, globalVars, entryScene, reachableMethods);
+        EmitCode(ctx, program, scenes, globalVars, entryScene, reachableMethods, usesRandom);
         return ctx.Buffer.ToArray();
     }
 

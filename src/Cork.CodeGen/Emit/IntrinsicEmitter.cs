@@ -42,6 +42,23 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             return;
         }
 
+        // Built-in intrinsic: peek: addr — read byte from memory address
+        if (msgSend.Receiver == null && msgSend.Segments.Count == 1 &&
+            msgSend.Segments[0].Name == "peek")
+        {
+            EmitPeek(msgSend.Segments[0].Argument!);
+            return;
+        }
+
+        // Built-in intrinsic: random: — read SID noise register ($D41B)
+        if (msgSend.Receiver == null && msgSend.Segments.Count == 1 &&
+            msgSend.Segments[0].Name == "random" && msgSend.Segments[0].Argument == null)
+        {
+            ctx.Runtime.Add("random");
+            ctx.Buffer.EmitLdaAbsolute(0xD41B);
+            return;
+        }
+
         // Scene method call (no receiver)
         if (msgSend.Receiver == null && msgSend.Segments.Count > 0)
         {
@@ -146,6 +163,57 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
         }
 
         throw new CompileError("Unsupported message send", msgSend.Location);
+    }
+
+    /// <summary>
+    /// peek: addr — reads a byte from memory into A.
+    /// Supports constant address, constant + expr, and word variable.
+    /// </summary>
+    public void EmitPeek(ExprNode addressExpr)
+    {
+        // Constant fold
+        if (ctx.Expressions.TryFoldConstant(addressExpr, out var foldedAddr))
+            addressExpr = new IntLiteralExpr(foldedAddr, addressExpr.Location);
+
+        if (addressExpr is BinaryExpr { Op: Language.Lexing.TokenKind.Plus } preAdd &&
+            preAdd.Left is not IntLiteralExpr &&
+            ctx.Expressions.TryFoldConstant(preAdd.Left, out var foldedBase))
+        {
+            addressExpr = new BinaryExpr(
+                new IntLiteralExpr(foldedBase, preAdd.Left.Location),
+                Language.Lexing.TokenKind.Plus,
+                preAdd.Right,
+                preAdd.Location);
+        }
+
+        if (addressExpr is BinaryExpr { Op: Language.Lexing.TokenKind.Plus } addExpr &&
+            addExpr.Left is IntLiteralExpr baseAddr)
+        {
+            // peek: (constant + expr) → LDA base,X
+            ctx.Expressions.EmitExprToA(addExpr.Right);
+            ctx.Buffer.EmitTax();
+            ctx.Buffer.EmitLdaAbsoluteX((ushort)baseAddr.Value);
+        }
+        else if (addressExpr is IntLiteralExpr constAddr)
+        {
+            // peek: constant → LDA absolute
+            ctx.Buffer.EmitLdaAbsolute((ushort)constAddr.Value);
+        }
+        else if (addressExpr is IdentifierExpr addrIdent && ctx.Symbols.IsWordVar(addrIdent.Name))
+        {
+            // peek: wordVar → LDA ($FB),Y
+            var zp = ctx.Symbols.GetLocal(addrIdent.Name);
+            ctx.Buffer.EmitLdaZeroPage(zp);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
+            ctx.Buffer.EmitLdaZeroPage((byte)(zp + 1));
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
+            ctx.Buffer.EmitLdyImmediate(0);
+            ctx.Buffer.EmitLdaIndirectY(EmitContext.ZpPointerLo);
+        }
+        else
+        {
+            throw new CompileError("peek address must be constant, constant + expr, or word variable", addressExpr.Location);
+        }
     }
 
     public void EmitPoke(ExprNode addressExpr, ExprNode valueExpr)
