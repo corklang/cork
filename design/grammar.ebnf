@@ -84,7 +84,7 @@ type = primitive_type
      | array_type ;
 
 primitive_type = "byte" | "sbyte" | "word" | "sword"
-               | "bool" | "fixed" | "string" ;
+               | "bool" | "fixed" | "sfixed" | "string" ;
 
 (* Built-in hardware types — lowercase, always available, no imports.    *)
 (* These represent C64 hardware resources managed by the compiler.       *)
@@ -720,7 +720,7 @@ const_expression = expression ;
 (* user-defined names.                                                   *)
 (*                                                                       *)
 (* Primitive type keywords:                                              *)
-(*   byte  sbyte  word  sword  bool  fixed  string                       *)
+(*   byte  sbyte  word  sword  bool  fixed  sfixed  string               *)
 (*                                                                       *)
 (* Hardware type keywords:                                               *)
 (*   sprite  charset  music  sound  tilemap                              *)

@@ -69,7 +69,8 @@ enemy.x = 100;
 | `word`   | 16-bit | Unsigned 0-65535                   |
 | `sword`  | 16-bit | Signed -32768 to 32767             |
 | `bool`   | 8-bit  | true/false                         |
-| `fixed`  | 16-bit | 8.8 fixed-point for sub-pixel math |
+| `fixed`  | 16-bit | Unsigned 8.8 fixed-point (0.0 to 255.996) |
+| `sfixed` | 16-bit | Signed 8.8 fixed-point (-128.0 to 127.996) |
 | `string` | fixed  | Fixed-size PETSCII string (size set at declaration) |
 
 ### Built-in Hardware Types
@@ -925,6 +926,23 @@ Cork uses keyword modifiers for variant behavior. This is a consistent pattern t
 | Dynamic strings      | Strings are fixed-size, determined at declaration   |
 
 ---
+
+## Designed But Not Yet Implemented
+
+These features are specified in the language design and grammar but not yet in the compiler:
+
+| Feature | Notes |
+|---------|-------|
+| `as` type casting | `big as byte`, `speed as fixed` — token and grammar exist |
+| `for (x in array)` | For-each iteration — token exists |
+| Struct initializer syntax | `Enemy { x = 10, y = 20 }` — in grammar |
+| `return` with value | Methods returning computed values |
+| `string` type | Fixed-size PETSCII strings |
+| `import "file.cork"` | Multi-file programs |
+| Struct composition | Structs containing other structs |
+| Sprite declarations | `sprite name { ... }` declarative blocks in scenes |
+| Scene-local resource imports | `charset font = import("font.bin")` inside scenes |
+| D64 / CRT output | Disk image and cartridge generation |
 
 ## Open Questions for Future Discussion
 
