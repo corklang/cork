@@ -14,6 +14,7 @@ public sealed class Lexer(string source, string filePath = "<stdin>")
         ["sword"] = TokenKind.SwordKw,
         ["bool"] = TokenKind.BoolKw,
         ["fixed"] = TokenKind.FixedKw,
+        ["sfixed"] = TokenKind.SfixedKw,
         ["string"] = TokenKind.StringKw,
         ["var"] = TokenKind.VarKw,
         ["sprite"] = TokenKind.SpriteKw,

@@ -1,0 +1,61 @@
+// Feature: fixed (8.8 fixed-point) — smooth sub-pixel movement
+
+entry scene Demo {
+    hardware {
+        border: Color.blue;
+        background: Color.black;
+    }
+
+    fixed spriteX = 80.0;
+    fixed spriteY = 100.0;
+    fixed dx = 0.75;
+    fixed dy = 0.5;
+
+    enter {
+        // Set up sprite
+        poke: 0x07F8 value: spritePtr;
+        poke: 0xD015 value: 1;
+        poke: 0xD027 value: 1;
+    }
+
+    frame {
+        // Bounce check BEFORE movement to prevent overflow
+        if (spriteX > 220.0) { dx = -0.75; }
+        if (spriteX < 40.0)  { dx = 0.75; }
+        if (spriteY > 210.0) { dy = -0.5; }
+        if (spriteY < 60.0)  { dy = 0.5; }
+
+        // Smooth sub-pixel movement
+        spriteX += dx;
+        spriteY += dy;
+
+        // Update sprite position (integer part used automatically)
+        poke: 0xD000 value: spriteX;
+        poke: 0xD001 value: spriteY;
+    }
+}
+
+const byte spritePtr = 13;
+const byte[63] spriteData = {
+    0x00, 0x7E, 0x00,
+    0x01, 0xFF, 0x80,
+    0x07, 0xFF, 0xE0,
+    0x0F, 0xFF, 0xF0,
+    0x1F, 0xFF, 0xF8,
+    0x3F, 0xFF, 0xFC,
+    0x3F, 0xFF, 0xFC,
+    0x7F, 0xFF, 0xFE,
+    0x7F, 0xFF, 0xFE,
+    0x7F, 0xFF, 0xFE,
+    0x7F, 0xFF, 0xFE,
+    0x7F, 0xFF, 0xFE,
+    0x3F, 0xFF, 0xFC,
+    0x3F, 0xFF, 0xFC,
+    0x1F, 0xFF, 0xF8,
+    0x0F, 0xFF, 0xF0,
+    0x07, 0xFF, 0xE0,
+    0x01, 0xFF, 0x80,
+    0x00, 0x7E, 0x00,
+    0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00
+};

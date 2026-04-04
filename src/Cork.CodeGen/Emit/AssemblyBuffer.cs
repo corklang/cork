@@ -76,6 +76,12 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     public void EmitIncZeroPage(byte addr) { EmitByte(0xE6); EmitByte(addr); }
     public void EmitDecZeroPage(byte addr) { EmitByte(0xC6); EmitByte(addr); }
 
+    // Shift
+    public void EmitLsrZeroPage(byte addr) { EmitByte(0x46); EmitByte(addr); }
+    public void EmitRorZeroPage(byte addr) { EmitByte(0x66); EmitByte(addr); }
+    public void EmitAslZeroPage(byte addr) { EmitByte(0x06); EmitByte(addr); }
+    public void EmitRolZeroPage(byte addr) { EmitByte(0x26); EmitByte(addr); }
+
     // Compare
     public void EmitCmpImmediate(byte value) { EmitByte(0xC9); EmitByte(value); }
     public void EmitCmpZeroPage(byte addr) { EmitByte(0xC5); EmitByte(addr); }

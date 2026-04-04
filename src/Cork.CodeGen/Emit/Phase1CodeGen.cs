@@ -86,6 +86,9 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         foreach (var gm in globalMethods)
             emitter.EmitGlobalMethod(gm);
 
+        // Runtime library (multiply etc.) — only if needed
+        emitter.EmitRuntimeLibrary();
+
         emitter.Buffer.ResolveFixups();
 
         // Combine code + data
@@ -130,6 +133,7 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             if (decl is GlobalMethodNode gm)
                 emitter.EmitGlobalMethod(gm);
 
+        emitter.EmitRuntimeLibrary();
         return emitter.Buffer.ToArray();
     }
 
@@ -159,6 +163,24 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         // ZP pointer for indirect indexed addressing
         private const byte ZpPointerLo = 0xFB;
         private const byte ZpPointerHi = 0xFC;
+        // ZP slots for runtime multiply
+        private const byte ZpMulA = 0xF0;
+        private const byte ZpMulB = 0xF1;
+        private const byte ZpMulResultLo = 0xF2;
+        private const byte ZpMulResultHi = 0xF3;
+        // Fixed multiply scratch
+        private const byte ZpFixedArg1Lo = 0xF4;
+        private const byte ZpFixedArg1Hi = 0xF5;
+        private const byte ZpFixedArg2Lo = 0xF6;
+        private const byte ZpFixedArg2Hi = 0xF7;
+        private const byte ZpFixedResB0 = 0xF8; // byte 0 (discarded fractional)
+        private const byte ZpFixedResB1 = 0xF9; // byte 1 = result lo
+        private const byte ZpFixedResB2 = 0xFA; // byte 2 = result hi
+        private const byte ZpSignFlag = 0xEF;   // sign flag for signed multiply (separate from result bytes!)
+        // Runtime features — only emitted if needed
+        private readonly HashSet<string> _runtime = [];
+        // Compile-time constants: name → value (no ZP allocation, inlined everywhere)
+        private readonly Dictionary<string, long> _constants = [];
         // Loop context for break/continue
         private readonly Stack<(string BreakLabel, string ContinueLabel)> _loopStack = [];
 
@@ -476,6 +498,13 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 
         private void EmitSceneVar(SceneVarDeclNode decl)
         {
+            // Const: store value in compile-time table, no ZP, no code
+            if (decl.IsConst && decl.Initializer is IntLiteralExpr constLit)
+            {
+                _constants[decl.Name] = constLit.Value;
+                return;
+            }
+
             // Struct instance: allocate ZP for each field with defaults
             if (_structTypes.TryGetValue(decl.TypeName, out var structType))
             {
@@ -497,40 +526,8 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 return;
             }
 
-            // Word variable
-            if (decl.TypeName == "word")
-            {
-                var zpAddr = AllocWordZeroPage(decl.Name);
-                if (decl.Initializer is IntLiteralExpr wordLit)
-                {
-                    var val = (ushort)wordLit.Value;
-                    Buffer.EmitLdaImmediate((byte)(val & 0xFF));
-                    Buffer.EmitStaZeroPage(zpAddr);
-                    Buffer.EmitLdaImmediate((byte)(val >> 8));
-                    Buffer.EmitStaZeroPage((byte)(zpAddr + 1));
-                }
-                else
-                {
-                    Buffer.EmitLdaImmediate(0);
-                    Buffer.EmitStaZeroPage(zpAddr);
-                    Buffer.EmitStaZeroPage((byte)(zpAddr + 1));
-                }
-                return;
-            }
-
-            // Byte variable
-            var zpAddr2 = AllocZeroPage(decl.Name);
-            _varTypes[decl.Name] = "byte";
-            if (decl.Initializer != null)
-            {
-                EmitExprToA(decl.Initializer);
-                Buffer.EmitStaZeroPage(zpAddr2);
-            }
-            else
-            {
-                Buffer.EmitLdaImmediate(0);
-                Buffer.EmitStaZeroPage(zpAddr2);
-            }
+            // Primitive variable (byte, sbyte, word, sword, fixed)
+            EmitTypedVarInit(decl.TypeName, decl.Name, decl.Initializer);
         }
 
         private void EmitBlock(BlockNode block)
@@ -559,31 +556,46 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 
         private void EmitVarDecl(VarDeclStmt decl)
         {
-            if (decl.TypeName == "word")
+            if (decl.IsConst && decl.Initializer is IntLiteralExpr constLit)
             {
-                var zp = AllocWordZeroPage(decl.Name);
-                if (decl.Initializer is IntLiteralExpr intLit)
+                _constants[decl.Name] = constLit.Value;
+                return;
+            }
+            EmitTypedVarInit(decl.TypeName, decl.Name, decl.Initializer);
+        }
+
+        private void EmitTypedVarInit(string typeName, string name, ExprNode? initializer)
+        {
+            if (Is16BitType(typeName))
+            {
+                var zp = AllocWordZeroPage(name);
+                _varTypes[name] = typeName;
+
+                // Word/fixed variable initialized from another word/fixed variable
+                if (initializer is IdentifierExpr srcIdent && IsWordVar(srcIdent.Name))
                 {
-                    var val = (ushort)intLit.Value;
+                    var srcZp = GetLocal(srcIdent.Name);
+                    Buffer.EmitLdaZeroPage(srcZp);
+                    Buffer.EmitStaZeroPage(zp);
+                    Buffer.EmitLdaZeroPage((byte)(srcZp + 1));
+                    Buffer.EmitStaZeroPage((byte)(zp + 1));
+                }
+                else
+                {
+                    var val = Resolve16BitInitializer(typeName, initializer);
                     Buffer.EmitLdaImmediate((byte)(val & 0xFF));
                     Buffer.EmitStaZeroPage(zp);
                     Buffer.EmitLdaImmediate((byte)(val >> 8));
                     Buffer.EmitStaZeroPage((byte)(zp + 1));
                 }
-                else
-                {
-                    Buffer.EmitLdaImmediate(0);
-                    Buffer.EmitStaZeroPage(zp);
-                    Buffer.EmitStaZeroPage((byte)(zp + 1));
-                }
             }
             else
             {
-                var zp = AllocZeroPage(decl.Name);
-                _varTypes[decl.Name] = "byte";
-                if (decl.Initializer != null)
+                var zp = AllocZeroPage(name);
+                _varTypes[name] = typeName;
+                if (initializer != null)
                 {
-                    EmitExprToA(decl.Initializer);
+                    EmitExprToA(initializer);
                     Buffer.EmitStaZeroPage(zp);
                 }
                 else
@@ -592,6 +604,35 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                     Buffer.EmitStaZeroPage(zp);
                 }
             }
+        }
+
+        private static bool Is16BitType(string t) => t is "word" or "sword" or "fixed" or "sfixed";
+        private static bool IsSignedType(string t) => t is "sbyte" or "sword" or "sfixed";
+
+        private static ushort Resolve16BitInitializer(string typeName, ExprNode? init)
+        {
+            if (init == null) return 0;
+            if (init is IntLiteralExpr intLit) return (ushort)intLit.Value;
+            if (init is FixedLiteralExpr fixLit)
+            {
+                // Convert double to 8.8 fixed-point
+                var intPart = (int)fixLit.Value;
+                var fracPart = (int)((fixLit.Value - intPart) * 256);
+                if (fixLit.Value < 0)
+                {
+                    // Two's complement for negative fixed values
+                    var raw = (int)(fixLit.Value * 256);
+                    return (ushort)(raw & 0xFFFF);
+                }
+                return (ushort)((intPart << 8) | (fracPart & 0xFF));
+            }
+            if (init is UnaryExpr { Op: TokenKind.Minus } neg && neg.Operand is FixedLiteralExpr negFix)
+            {
+                // Negative fixed: -0.75 → two's complement of 0.75 in 8.8
+                var raw = (int)(-negFix.Value * 256);
+                return (ushort)(raw & 0xFFFF);
+            }
+            return 0;
         }
 
         private byte AllocWordZeroPage(string name)
@@ -846,13 +887,39 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 return;
             }
 
-            // 16-bit comparison: word var vs literal
+            // 16-bit comparison: word/fixed/sword var vs literal
             if (condition is BinaryExpr wordBin &&
                 wordBin.Left is IdentifierExpr wordIdent &&
-                IsWordVar(wordIdent.Name) &&
-                wordBin.Right is IntLiteralExpr wordLit)
+                IsWordVar(wordIdent.Name))
             {
-                EmitWordComparisonBranchTrue(wordIdent.Name, wordBin.Op, (ushort)wordLit.Value, skipBytes);
+                var litVal = Resolve16BitInitializer("", wordBin.Right);
+                EmitWordComparisonBranchTrue(wordIdent.Name, wordBin.Op, litVal, skipBytes);
+                return;
+            }
+
+            // Signed byte comparison: sbyte vs 0
+            if (condition is BinaryExpr signedBin &&
+                signedBin.Left is IdentifierExpr signedIdent &&
+                _varTypes.TryGetValue(signedIdent.Name, out var stype) && stype == "sbyte" &&
+                signedBin.Right is IntLiteralExpr { Value: 0 })
+            {
+                var zp = GetLocal(signedIdent.Name);
+                Buffer.EmitLdaZeroPage(zp);
+                switch (signedBin.Op)
+                {
+                    case TokenKind.Less:        // < 0 → negative → BMI
+                        Buffer.EmitBmi((sbyte)skipBytes); break;
+                    case TokenKind.GreaterEqual: // >= 0 → not negative → BPL
+                        Buffer.EmitBpl((sbyte)skipBytes); break;
+                    case TokenKind.Greater:      // > 0 → not negative AND not zero
+                        Buffer.EmitBeq(2);
+                        Buffer.EmitBpl((sbyte)skipBytes); break;
+                    case TokenKind.LessEqual:    // <= 0 → negative OR zero
+                        Buffer.EmitBmi((sbyte)skipBytes);
+                        Buffer.EmitBeq((sbyte)(skipBytes - 2)); break;
+                    default:
+                        throw new InvalidOperationException($"Unsupported signed comparison: {signedBin.Op}");
+                }
                 return;
             }
 
@@ -863,8 +930,10 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 
                 if (bin.Right is IntLiteralExpr intLit)
                     Buffer.EmitCmpImmediate((byte)intLit.Value);
-                else if (bin.Right is IdentifierExpr ident)
-                    Buffer.EmitCmpZeroPage(GetLocal(ident.Name));
+                else if (bin.Right is IdentifierExpr ident && _constants.TryGetValue(ident.Name, out var cv))
+                    Buffer.EmitCmpImmediate((byte)cv);
+                else if (bin.Right is IdentifierExpr ident2)
+                    Buffer.EmitCmpZeroPage(GetLocal(ident2.Name));
                 else
                 {
                     Buffer.EmitPha();
@@ -948,6 +1017,14 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 return;
             }
 
+            // Built-in intrinsic: debugHex: screenAddr value: wordVar
+            if (msgSend.Receiver == null && msgSend.Segments.Count == 2 &&
+                msgSend.Segments[0].Name == "debugHex" && msgSend.Segments[1].Name == "value")
+            {
+                EmitDebugHex(msgSend.Segments[0].Argument!, msgSend.Segments[1].Argument!);
+                return;
+            }
+
             // Scene method call (no receiver)
             if (msgSend.Receiver == null && msgSend.Segments.Count > 0)
             {
@@ -1025,8 +1102,17 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                     Buffer.EmitLdaImmediate((byte)intLit.Value);
                     break;
 
+                case UnaryExpr { Op: TokenKind.Minus } neg when neg.Operand is IntLiteralExpr negInt:
+                    Buffer.EmitLdaImmediate((byte)(-negInt.Value & 0xFF));
+                    break;
+
                 case IdentifierExpr ident:
-                    Buffer.EmitLdaZeroPage(GetLocal(ident.Name));
+                    if (_constants.TryGetValue(ident.Name, out var constVal))
+                        Buffer.EmitLdaImmediate((byte)constVal);
+                    else if (IsWordVar(ident.Name))
+                        Buffer.EmitLdaZeroPage((byte)(GetLocal(ident.Name) + 1));
+                    else
+                        Buffer.EmitLdaZeroPage(GetLocal(ident.Name));
                     break;
 
                 case BinaryExpr { Op: TokenKind.Plus } bin:
@@ -1222,23 +1308,287 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             // FALSE path: JMP is emitted by the caller after this method returns
         }
 
+        /// <summary>
+        /// Emit runtime library routines (multiply etc.) at the end of the binary.
+        /// </summary>
+        public void EmitRuntimeLibrary()
+        {
+            if (_runtime.Count == 0) return;
+
+            if (!_runtime.Contains("mul8x8")) return;
+
+            // 8×8→16 unsigned multiply: ZpMulA × ZpMulB → ZpMulResultHi:ZpMulResultLo
+            // Standard shift-and-add. ZpMulB is destroyed (becomes result low byte).
+            Buffer.DefineLabel("_rt_mul8x8");
+            Buffer.EmitLdaImmediate(0);              // A = result high byte
+            Buffer.EmitLdxImmediate(8);              // 8 bits
+            Buffer.EmitLsrZeroPage(ZpMulB);          // shift first multiplier bit → carry
+            // .loop: (11-byte loop body)
+            Buffer.EmitBcc(3);                       // +3: skip CLC+ADC if bit was 0
+            Buffer.EmitClc();                        // 1
+            Buffer.EmitAdcZeroPage(ZpMulA);          // 2: add multiplicand
+            // .skip:
+            Buffer.EmitByte(0x6A);                   // ROR A: shift result high right
+            Buffer.EmitRorZeroPage(ZpMulB);          // ROR ZpMulB: shift result low + next multiplier bit → carry
+            Buffer.EmitDex();                        // 1
+            Buffer.EmitBne(unchecked((sbyte)(-11)));  // back to BCC (11 bytes back)
+            Buffer.EmitStaZeroPage(ZpMulResultHi);   // store high byte
+            Buffer.EmitLdaZeroPage(ZpMulB);          // ZpMulB now has result low
+            Buffer.EmitStaZeroPage(ZpMulResultLo);
+            Buffer.EmitRts();
+
+            // Fixed 8.8 × 8.8 → 8.8 multiply
+            // Input: ZpFixedArg1 (lo/hi), ZpFixedArg2 (lo/hi)
+            // Output: ZpFixedResB1 (result lo), ZpFixedResB2 (result hi)
+            // Algorithm: (A1h*A2h)<<16 + (A1h*A2l + A1l*A2h)<<8 + A1l*A2l
+            // Result 8.8 = middle two bytes
+            Buffer.DefineLabel("_rt_fixmul");
+
+            // Clear result accumulators
+            Buffer.EmitLdaImmediate(0);
+            Buffer.EmitStaZeroPage(ZpFixedResB0);
+            Buffer.EmitStaZeroPage(ZpFixedResB1);
+            Buffer.EmitStaZeroPage(ZpFixedResB2);
+
+            // 1. Al * Bl → add to bytes 0,1
+            Buffer.EmitLdaZeroPage(ZpFixedArg1Lo);
+            Buffer.EmitStaZeroPage(ZpMulA);
+            Buffer.EmitLdaZeroPage(ZpFixedArg2Lo);
+            Buffer.EmitStaZeroPage(ZpMulB);
+            Buffer.EmitJsrAbsolute(Buffer.GetLabel("_rt_mul8x8"));
+            Buffer.EmitLdaZeroPage(ZpMulResultLo);
+            Buffer.EmitStaZeroPage(ZpFixedResB0);       // byte 0
+            Buffer.EmitLdaZeroPage(ZpMulResultHi);
+            Buffer.EmitStaZeroPage(ZpFixedResB1);       // byte 1
+
+            // 2. Al * Bh → add to bytes 1,2
+            Buffer.EmitLdaZeroPage(ZpFixedArg1Lo);
+            Buffer.EmitStaZeroPage(ZpMulA);
+            Buffer.EmitLdaZeroPage(ZpFixedArg2Hi);
+            Buffer.EmitStaZeroPage(ZpMulB);
+            Buffer.EmitJsrAbsolute(Buffer.GetLabel("_rt_mul8x8"));
+            Buffer.EmitLdaZeroPage(ZpFixedResB1);
+            Buffer.EmitClc();
+            Buffer.EmitAdcZeroPage(ZpMulResultLo);
+            Buffer.EmitStaZeroPage(ZpFixedResB1);
+            Buffer.EmitLdaZeroPage(ZpFixedResB2);
+            Buffer.EmitAdcZeroPage(ZpMulResultHi);
+            Buffer.EmitStaZeroPage(ZpFixedResB2);
+
+            // 3. Ah * Bl → add to bytes 1,2
+            Buffer.EmitLdaZeroPage(ZpFixedArg1Hi);
+            Buffer.EmitStaZeroPage(ZpMulA);
+            Buffer.EmitLdaZeroPage(ZpFixedArg2Lo);
+            Buffer.EmitStaZeroPage(ZpMulB);
+            Buffer.EmitJsrAbsolute(Buffer.GetLabel("_rt_mul8x8"));
+            Buffer.EmitLdaZeroPage(ZpFixedResB1);
+            Buffer.EmitClc();
+            Buffer.EmitAdcZeroPage(ZpMulResultLo);
+            Buffer.EmitStaZeroPage(ZpFixedResB1);
+            Buffer.EmitLdaZeroPage(ZpFixedResB2);
+            Buffer.EmitAdcZeroPage(ZpMulResultHi);
+            Buffer.EmitStaZeroPage(ZpFixedResB2);
+
+            // 4. Ah * Bh → add to byte 2 (only low byte matters for 8.8)
+            Buffer.EmitLdaZeroPage(ZpFixedArg1Hi);
+            Buffer.EmitStaZeroPage(ZpMulA);
+            Buffer.EmitLdaZeroPage(ZpFixedArg2Hi);
+            Buffer.EmitStaZeroPage(ZpMulB);
+            Buffer.EmitJsrAbsolute(Buffer.GetLabel("_rt_mul8x8"));
+            Buffer.EmitLdaZeroPage(ZpFixedResB2);
+            Buffer.EmitClc();
+            Buffer.EmitAdcZeroPage(ZpMulResultLo);
+            Buffer.EmitStaZeroPage(ZpFixedResB2);
+
+            Buffer.EmitRts();
+
+            // Debug hex display: writes 4 hex chars to screen
+            // Input: ZpFixedArg1Lo/Hi = value, X = screen addr low, Y = screen addr high
+            if (_runtime.Contains("debughex"))
+            {
+                Buffer.DefineLabel("_rt_debughex");
+                Buffer.EmitStxZeroPage(ZpPointerLo);
+                Buffer.EmitByte(0x84); Buffer.EmitByte(ZpPointerHi); // STY zp
+
+                // Digit 0: high nybble of high byte
+                Buffer.EmitLdaZeroPage(ZpFixedArg1Hi);
+                Buffer.EmitByte(0x4A); Buffer.EmitByte(0x4A);
+                Buffer.EmitByte(0x4A); Buffer.EmitByte(0x4A);
+                Buffer.EmitJsrForward("_rt_hexchar");
+                Buffer.EmitLdyImmediate(0);
+                Buffer.EmitStaIndirectY(ZpPointerLo);
+
+                // Digit 1: low nybble of high byte
+                Buffer.EmitLdaZeroPage(ZpFixedArg1Hi);
+                Buffer.EmitByte(0x29); Buffer.EmitByte(0x0F);
+                Buffer.EmitJsrForward("_rt_hexchar");
+                Buffer.EmitLdyImmediate(1);
+                Buffer.EmitStaIndirectY(ZpPointerLo);
+
+                // Digit 2: high nybble of low byte
+                Buffer.EmitLdaZeroPage(ZpFixedArg1Lo);
+                Buffer.EmitByte(0x4A); Buffer.EmitByte(0x4A);
+                Buffer.EmitByte(0x4A); Buffer.EmitByte(0x4A);
+                Buffer.EmitJsrForward("_rt_hexchar");
+                Buffer.EmitLdyImmediate(2);
+                Buffer.EmitStaIndirectY(ZpPointerLo);
+
+                // Digit 3: low nybble of low byte
+                Buffer.EmitLdaZeroPage(ZpFixedArg1Lo);
+                Buffer.EmitByte(0x29); Buffer.EmitByte(0x0F);
+                Buffer.EmitJsrForward("_rt_hexchar");
+                Buffer.EmitLdyImmediate(3);
+                Buffer.EmitStaIndirectY(ZpPointerLo);
+                Buffer.EmitRts();
+
+                // hex_char: A (0-15) → screen code
+                Buffer.DefineLabel("_rt_hexchar");
+                Buffer.EmitCmpImmediate(10);
+                Buffer.EmitBcc(4);          // 0-9 → skip
+                Buffer.EmitSec();
+                Buffer.EmitSbcImmediate(9); // 10-15 → 1-6 (A-F screen codes)
+                Buffer.EmitRts();
+                Buffer.EmitClc();
+                Buffer.EmitAdcImmediate(48); // 0-9 → 48-57 (0-9 screen codes)
+                Buffer.EmitRts();
+            }
+
+            // Signed fixed multiply wrapper — handles sign, calls unsigned fixmul
+            if (_runtime.Contains("sfixmul"))
+            {
+                // Uses ZpSignFlag (separate from result bytes cleared by fixmul!)
+                Buffer.DefineLabel("_rt_sfixmul");
+
+                // Clear sign flag (in separate ZP byte, NOT in result area!)
+                Buffer.EmitLdaImmediate(0);
+                Buffer.EmitStaZeroPage(ZpSignFlag);
+
+                // Check arg1 sign (high byte bit 7)
+                Buffer.EmitLdaZeroPage(ZpFixedArg1Hi);
+                Buffer.EmitBpl(15); // skip negate (15 bytes)
+                Buffer.EmitLdaImmediate(0);
+                Buffer.EmitSec();
+                Buffer.EmitSbcZeroPage(ZpFixedArg1Lo);
+                Buffer.EmitStaZeroPage(ZpFixedArg1Lo);
+                Buffer.EmitLdaImmediate(0);
+                Buffer.EmitSbcZeroPage(ZpFixedArg1Hi);
+                Buffer.EmitStaZeroPage(ZpFixedArg1Hi);
+                Buffer.EmitIncZeroPage(ZpSignFlag);
+
+                // Check arg2 sign
+                Buffer.EmitLdaZeroPage(ZpFixedArg2Hi);
+                Buffer.EmitBpl(15); // skip negate (15 bytes)
+                Buffer.EmitLdaImmediate(0);
+                Buffer.EmitSec();
+                Buffer.EmitSbcZeroPage(ZpFixedArg2Lo);
+                Buffer.EmitStaZeroPage(ZpFixedArg2Lo);
+                Buffer.EmitLdaImmediate(0);
+                Buffer.EmitSbcZeroPage(ZpFixedArg2Hi);
+                Buffer.EmitStaZeroPage(ZpFixedArg2Hi);
+                Buffer.EmitIncZeroPage(ZpSignFlag);
+
+                // Do unsigned multiply
+                Buffer.EmitJsrAbsolute(Buffer.GetLabel("_rt_fixmul"));
+
+                // Check sign flag: if odd (1), negate result
+                Buffer.EmitLdaZeroPage(ZpSignFlag);
+                Buffer.EmitByte(0x29); Buffer.EmitByte(0x01); // AND #1
+                Buffer.EmitBeq(13); // skip negate (13 bytes)
+                Buffer.EmitLdaImmediate(0);
+                Buffer.EmitSec();
+                Buffer.EmitSbcZeroPage(ZpFixedResB1);
+                Buffer.EmitStaZeroPage(ZpFixedResB1);
+                Buffer.EmitLdaImmediate(0);
+                Buffer.EmitSbcZeroPage(ZpFixedResB2);
+                Buffer.EmitStaZeroPage(ZpFixedResB2);
+
+                Buffer.EmitRts();
+            }
+        }
+
+        /// <summary>
+        /// debugHex: screenAddr value: expr
+        /// Writes a 16-bit value as 4 hex digits at a screen address.
+        /// </summary>
+        private void EmitDebugHex(ExprNode addrExpr, ExprNode valueExpr)
+        {
+            _runtime.Add("debughex");
+            var addr = (ushort)(((IntLiteralExpr)addrExpr).Value + 0x0400);
+
+            // Load value into ZpFixedArg1 (reuse as scratch)
+            if (valueExpr is IdentifierExpr ident && IsWordVar(ident.Name))
+            {
+                var zp = GetLocal(ident.Name);
+                Buffer.EmitLdaZeroPage(zp);
+                Buffer.EmitStaZeroPage(ZpFixedArg1Lo);
+                Buffer.EmitLdaZeroPage((byte)(zp + 1));
+                Buffer.EmitStaZeroPage(ZpFixedArg1Hi);
+            }
+            else
+            {
+                throw new InvalidOperationException("debugHex value must be a word/fixed/sfixed variable");
+            }
+
+            // Pass screen address in X (low) and Y (high)
+            Buffer.EmitLdxImmediate((byte)(addr & 0xFF));
+            Buffer.EmitLdyImmediate((byte)(addr >> 8));
+            Buffer.EmitJsrForward("_rt_debughex");
+        }
+
         private bool IsWordVar(string name) =>
-            _varTypes.TryGetValue(name, out var t) && t == "word";
+            _varTypes.TryGetValue(name, out var t) && Is16BitType(t);
 
         private void EmitWordAssignment(byte zpLo, TokenKind op, ExprNode value)
         {
             var zpHi = (byte)(zpLo + 1);
-            if (op == TokenKind.Equal && value is IntLiteralExpr intLit)
+
+            // Variable-to-variable 16-bit operations
+            if (value is IdentifierExpr varExpr && IsWordVar(varExpr.Name))
             {
-                var val = (ushort)intLit.Value;
+                var srcZp = GetLocal(varExpr.Name);
+                var srcHi = (byte)(srcZp + 1);
+                if (op == TokenKind.PlusEqual)
+                {
+                    Buffer.EmitLdaZeroPage(zpLo);
+                    Buffer.EmitClc();
+                    Buffer.EmitAdcZeroPage(srcZp);
+                    Buffer.EmitStaZeroPage(zpLo);
+                    Buffer.EmitLdaZeroPage(zpHi);
+                    Buffer.EmitAdcZeroPage(srcHi);
+                    Buffer.EmitStaZeroPage(zpHi);
+                }
+                else if (op == TokenKind.MinusEqual)
+                {
+                    Buffer.EmitLdaZeroPage(zpLo);
+                    Buffer.EmitSec();
+                    Buffer.EmitSbcZeroPage(srcZp);
+                    Buffer.EmitStaZeroPage(zpLo);
+                    Buffer.EmitLdaZeroPage(zpHi);
+                    Buffer.EmitSbcZeroPage(srcHi);
+                    Buffer.EmitStaZeroPage(zpHi);
+                }
+                else if (op == TokenKind.Equal)
+                {
+                    Buffer.EmitLdaZeroPage(srcZp);
+                    Buffer.EmitStaZeroPage(zpLo);
+                    Buffer.EmitLdaZeroPage(srcHi);
+                    Buffer.EmitStaZeroPage(zpHi);
+                }
+                return;
+            }
+
+            // Literal-based 16-bit operations
+            var val = Resolve16BitInitializer("", value);
+
+            if (op == TokenKind.Equal)
+            {
                 Buffer.EmitLdaImmediate((byte)(val & 0xFF));
                 Buffer.EmitStaZeroPage(zpLo);
                 Buffer.EmitLdaImmediate((byte)(val >> 8));
                 Buffer.EmitStaZeroPage(zpHi);
             }
-            else if (op == TokenKind.PlusEqual && value is IntLiteralExpr addLit)
+            else if (op == TokenKind.PlusEqual)
             {
-                var val = (ushort)addLit.Value;
                 Buffer.EmitLdaZeroPage(zpLo);
                 Buffer.EmitClc();
                 Buffer.EmitAdcImmediate((byte)(val & 0xFF));
@@ -1247,9 +1597,8 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 Buffer.EmitAdcImmediate((byte)(val >> 8));
                 Buffer.EmitStaZeroPage(zpHi);
             }
-            else if (op == TokenKind.MinusEqual && value is IntLiteralExpr subLit)
+            else if (op == TokenKind.MinusEqual)
             {
-                var val = (ushort)subLit.Value;
                 Buffer.EmitLdaZeroPage(zpLo);
                 Buffer.EmitSec();
                 Buffer.EmitSbcImmediate((byte)(val & 0xFF));
@@ -1257,6 +1606,63 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 Buffer.EmitLdaZeroPage(zpHi);
                 Buffer.EmitSbcImmediate((byte)(val >> 8));
                 Buffer.EmitStaZeroPage(zpHi);
+            }
+            else if (op == TokenKind.StarEqual)
+            {
+                // Determine signed vs unsigned based on variable type
+                var varType = _varTypes.FirstOrDefault(kv => _locals.TryGetValue(kv.Key, out var z) && z == zpLo).Value;
+                var isSigned = varType == "sfixed" || varType == "sword";
+                _runtime.Add("mul8x8");
+                _runtime.Add(isSigned ? "sfixmul" : "fixmul");
+                // Load operands into fixed multiply ZP slots
+                Buffer.EmitLdaZeroPage(zpLo);
+                Buffer.EmitStaZeroPage(ZpFixedArg1Lo);
+                Buffer.EmitLdaZeroPage(zpHi);
+                Buffer.EmitStaZeroPage(ZpFixedArg1Hi);
+
+                // Resolve right operand
+                if (value is IdentifierExpr mulVar && IsWordVar(mulVar.Name))
+                {
+                    var srcZp = GetLocal(mulVar.Name);
+                    Buffer.EmitLdaZeroPage(srcZp);
+                    Buffer.EmitStaZeroPage(ZpFixedArg2Lo);
+                    Buffer.EmitLdaZeroPage((byte)(srcZp + 1));
+                    Buffer.EmitStaZeroPage(ZpFixedArg2Hi);
+                }
+                else
+                {
+                    var mulVal = Resolve16BitInitializer("", value);
+                    Buffer.EmitLdaImmediate((byte)(mulVal & 0xFF));
+                    Buffer.EmitStaZeroPage(ZpFixedArg2Lo);
+                    Buffer.EmitLdaImmediate((byte)(mulVal >> 8));
+                    Buffer.EmitStaZeroPage(ZpFixedArg2Hi);
+                }
+
+                Buffer.EmitJsrForward(isSigned ? "_rt_sfixmul" : "_rt_fixmul");
+
+                // Store result back
+                Buffer.EmitLdaZeroPage(ZpFixedResB1);
+                Buffer.EmitStaZeroPage(zpLo);
+                Buffer.EmitLdaZeroPage(ZpFixedResB2);
+                Buffer.EmitStaZeroPage(zpHi);
+            }
+            else if (op == TokenKind.ShiftRightEqual && value is IntLiteralExpr shrLit)
+            {
+                // 16-bit unsigned right shift: LSR hi; ROR lo (repeated N times)
+                for (var i = 0; i < (int)shrLit.Value; i++)
+                {
+                    Buffer.EmitLsrZeroPage(zpHi);
+                    Buffer.EmitRorZeroPage(zpLo);
+                }
+            }
+            else if (op == TokenKind.ShiftLeftEqual && value is IntLiteralExpr shlLit)
+            {
+                // 16-bit left shift: ASL lo; ROL hi (repeated N times)
+                for (var i = 0; i < (int)shlLit.Value; i++)
+                {
+                    Buffer.EmitAslZeroPage(zpLo);
+                    Buffer.EmitRolZeroPage(zpHi);
+                }
             }
             else
             {

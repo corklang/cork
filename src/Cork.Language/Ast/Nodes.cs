@@ -129,6 +129,7 @@ public sealed record SceneVarDeclNode(
     string TypeName,
     string Name,
     ExprNode? Initializer,
+    bool IsConst,
     SourceLocation Location
 ) : SceneMemberNode(Location);
 
@@ -154,6 +155,7 @@ public sealed record BlockNode(
 ) : AstNode(Location);
 
 public sealed record VarDeclStmt(
+    bool IsConst,
     string TypeName,
     string Name,
     ExprNode? Initializer,

@@ -19,6 +19,7 @@ public enum TokenKind
     SwordKw,
     BoolKw,
     FixedKw,
+    SfixedKw,
     StringKw,
 
     // Inference keyword

@@ -276,6 +276,14 @@ public sealed class Parser(List<Token> tokens)
         if (Check(TokenKind.RasterKw))
             return ParseRasterBlock();
 
+        // Scene-local const
+        if (Check(TokenKind.ConstKw))
+        {
+            Advance();
+            _nextIsConst = true;
+            return ParseSceneVarDecl();
+        }
+
         // Scene-local variable: type name [= expr]; (primitive or struct type)
         if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && !PeekIs(2, TokenKind.Colon))
             return ParseSceneVarDecl();
@@ -360,16 +368,20 @@ public sealed class Parser(List<Token> tokens)
         return new RasterBlockNode(line, body, loc);
     }
 
+    private bool _nextIsConst;
+
     private SceneVarDeclNode ParseSceneVarDecl()
     {
         var loc = CurrentLocation;
+        var isConst = _nextIsConst;
+        _nextIsConst = false;
         var typeName = Advance().Text;
         var name = Expect(TokenKind.Identifier, "name").Text;
         ExprNode? init = null;
         if (TryConsume(TokenKind.Equal))
             init = ParseExpression();
         Expect(TokenKind.Semicolon, ";");
-        return new SceneVarDeclNode(typeName, name, init, loc);
+        return new SceneVarDeclNode(typeName, name, init, isConst, loc);
     }
 
     private SceneMethodNode ParseSceneMethod()
@@ -438,6 +450,14 @@ public sealed class Parser(List<Token> tokens)
         if (Check(TokenKind.GoKw)) return ParseGo();
         if (Check(TokenKind.BreakKw)) { var loc = CurrentLocation; Advance(); Expect(TokenKind.Semicolon, ";"); return new BreakStmt(loc); }
         if (Check(TokenKind.ContinueKw)) { var loc = CurrentLocation; Advance(); Expect(TokenKind.Semicolon, ";"); return new ContinueStmt(loc); }
+
+        // Const declaration
+        if (Check(TokenKind.ConstKw) && (PeekIs(1, TokenKind.Identifier) || IsTypeKeyword(tokens[_pos + 1].Kind)))
+        {
+            Advance();
+            _nextIsConst = true;
+            return ParseLocalVarDecl();
+        }
 
         // Variable declaration: type name = expr;
         if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && !PeekIs(2, TokenKind.Colon))
@@ -526,7 +546,7 @@ public sealed class Parser(List<Token> tokens)
         ExprNode? init = null;
         if (TryConsume(TokenKind.Equal))
             init = ParseExpression();
-        return new VarDeclStmt(typeName, name, init, loc);
+        return new VarDeclStmt(false, typeName, name, init, loc);
     }
 
     private StmtNode ParseForStep()
@@ -609,13 +629,15 @@ public sealed class Parser(List<Token> tokens)
     private VarDeclStmt ParseLocalVarDecl()
     {
         var loc = CurrentLocation;
-        var typeName = Advance().Text; // type keyword or 'var'
+        var isConst = _nextIsConst;
+        _nextIsConst = false;
+        var typeName = Advance().Text;
         var name = Expect(TokenKind.Identifier, "name").Text;
         ExprNode? init = null;
         if (TryConsume(TokenKind.Equal))
             init = ParseExpression();
         Expect(TokenKind.Semicolon, ";");
-        return new VarDeclStmt(typeName, name, init, loc);
+        return new VarDeclStmt(isConst, typeName, name, init, loc);
     }
 
     private StmtNode ParseExpressionStatement()
@@ -960,7 +982,7 @@ public sealed class Parser(List<Token> tokens)
     private static bool IsTypeKeyword(TokenKind kind) => kind is
         TokenKind.ByteKw or TokenKind.SbyteKw or
         TokenKind.WordKw or TokenKind.SwordKw or
-        TokenKind.BoolKw or TokenKind.FixedKw or
+        TokenKind.BoolKw or TokenKind.FixedKw or TokenKind.SfixedKw or
         TokenKind.StringKw or TokenKind.VarKw;
 
     private static bool IsAssignmentOp(TokenKind kind) => kind is

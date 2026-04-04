@@ -1,0 +1,50 @@
+// Feature: sbyte (signed byte) — used for velocity/direction
+
+entry scene Demo {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+    }
+
+    byte ballPos = 120;
+    sbyte velocity = 2;
+    byte frameCount = 0;
+
+    enter {
+        // Clear top row
+        for (byte i = 0; i < 40; i += 1) {
+            poke: 0x0400 + i value: 32;
+        }
+    }
+
+    frame {
+        // Erase
+        poke: 0x0400 + ballPos value: 32;
+
+        // Move
+        frameCount += 1;
+        if (frameCount == 10) {
+            ballPos += velocity;
+            frameCount = 0;
+        }
+
+        // Bounce — signed comparison
+        if (velocity > 0) {
+            if (ballPos > 38) { velocity = -1; }
+        }
+        if (velocity < 0) {
+            if (ballPos < 1) { velocity = 1; }
+        }
+
+        // Draw
+        poke: 0x0400 + ballPos value: 81;
+
+        // Border shows direction
+        if (velocity < 0) {
+            poke: 0xD020 value: 2;
+        }
+        if (velocity > 0) {
+            poke: 0xD020 value: 5;
+        }
+    }
+}
