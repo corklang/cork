@@ -33,6 +33,13 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                     ctx.Buffer.EmitLdxZeroPage(fev.IndexZp);
                     ctx.Buffer.EmitLdaAbsoluteX(fev.DataAddr);
                 }
+                // Inside for-each struct method: bare field names resolve to indexed access
+                else if (ctx.ForEachStructVar is { } fesv2 &&
+                         fesv2.FieldBases.TryGetValue(ident.Name, out var fieldBase2))
+                {
+                    ctx.Buffer.EmitLdxZeroPage(fesv2.IndexZp);
+                    ctx.Buffer.EmitByte(0xB5); ctx.Buffer.EmitByte(fieldBase2); // LDA zp,X
+                }
                 else if (ctx.Symbols.TryGetConstant(ident.Name, out var constVal))
                     ctx.Buffer.EmitLdaImmediate((byte)constVal);
                 else if (ctx.Symbols.IsWordVar(ident.Name))

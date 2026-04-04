@@ -108,6 +108,17 @@ public sealed class StatementEmitter(EmitContext ctx)
 
     public void EmitAssignment(AssignmentStmt assign)
     {
+        // For-each struct field assignment: bare field name inside method
+        if (assign.Target is IdentifierExpr feFieldIdent &&
+            ctx.ForEachStructVar is { } fesv &&
+            fesv.FieldBases.TryGetValue(feFieldIdent.Name, out var feFieldBase))
+        {
+            ctx.Expressions.EmitExprToA(assign.Value);
+            ctx.Buffer.EmitLdxZeroPage(fesv.IndexZp);
+            ctx.Buffer.EmitByte(0x95); ctx.Buffer.EmitByte(feFieldBase); // STA zp,X
+            return;
+        }
+
         byte zp;
         var varName = "";
         if (assign.Target is IdentifierExpr ident)

@@ -34,6 +34,14 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             return;
         }
 
+        // Built-in intrinsic: printAt: screenPos text: constArrayName
+        if (msgSend.Receiver == null && msgSend.Segments.Count == 2 &&
+            msgSend.Segments[0].Name == "printAt" && msgSend.Segments[1].Name == "text")
+        {
+            EmitPrintAt(msgSend.Segments[0].Argument!, msgSend.Segments[1].Argument!);
+            return;
+        }
+
         // Scene method call (no receiver)
         if (msgSend.Receiver == null && msgSend.Segments.Count > 0)
         {
@@ -72,6 +80,24 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             return;
         }
 
+        // For-each struct method call: e draw:; where e is the loop variable
+        if (msgSend.Receiver is IdentifierExpr feIdent &&
+            ctx.ForEachStructVar is { } fesv && feIdent.Name == fesv.Name)
+        {
+            var selectorName = string.Join("", msgSend.Segments.Select(s => s.Name + ":"));
+            // Find the method in the struct type
+            if (ctx.Symbols.TryGetStructType(fesv.StructType, out var structDecl))
+            {
+                var method = structDecl.Methods.FirstOrDefault(m => m.SelectorName == selectorName);
+                if (method != null)
+                {
+                    // Emit method body inline — field access resolves via ForEachStructVar context
+                    ctx.Statements.EmitBlock(method.Body);
+                    return;
+                }
+            }
+        }
+
         throw new InvalidOperationException("Unsupported message send");
     }
 
@@ -94,6 +120,40 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
         {
             throw new InvalidOperationException("poke address must be constant or constant + expression");
         }
+    }
+
+    /// <summary>
+    /// printAt: screenPos text: constArrayName
+    /// Writes a const byte array to screen RAM at $0400 + screenPos.
+    /// </summary>
+    private void EmitPrintAt(ExprNode posExpr, ExprNode textExpr)
+    {
+        if (textExpr is not IdentifierExpr textIdent)
+            throw new InvalidOperationException("printAt text must be a const array name");
+
+        if (!ctx.DataAddresses.TryGetValue(textIdent.Name, out var dataAddr))
+            throw new InvalidOperationException($"Unknown const array: {textIdent.Name}");
+
+        var arraySize = ctx.GetConstArraySize(textIdent.Name);
+
+        // Calculate screen address: $0400 + pos
+        long pos = 0;
+        if (posExpr is IntLiteralExpr posLit)
+            pos = posLit.Value;
+        else if (ctx.Expressions.TryFoldConstant(posExpr, out var foldedPos))
+            pos = foldedPos;
+
+        var screenAddr = (ushort)(0x0400 + pos);
+
+        // Emit loop: LDX #0; .loop: LDA data,X; STA screen,X; INX; CPX #len; BNE .loop
+        // LDX #0; loop: LDA data,X; STA screen,X; INX; CPX #len; BNE loop
+        ctx.Buffer.EmitLdxImmediate(0);
+        // Loop body: LDA(3) + STA(3) + INX(1) + CPX(2) + BNE(2) = 11 bytes
+        ctx.Buffer.EmitLdaAbsoluteX(dataAddr);
+        ctx.Buffer.EmitStaAbsoluteX(screenAddr);
+        ctx.Buffer.EmitInx();
+        ctx.Buffer.EmitCpxImmediate((byte)arraySize);
+        ctx.Buffer.EmitBne(unchecked((sbyte)(-11))); // back to LDA
     }
 
     public void EmitPokeScreen(ExprNode offsetExpr, ExprNode valueExpr)
