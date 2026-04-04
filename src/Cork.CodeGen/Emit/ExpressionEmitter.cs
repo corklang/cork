@@ -10,6 +10,13 @@ public sealed class ExpressionEmitter(EmitContext ctx)
 {
     public void EmitExprToA(ExprNode expr)
     {
+        // Constant folding: if the expression can be evaluated at compile time, emit as immediate
+        if (TryFoldConstant(expr, out var folded))
+        {
+            ctx.Buffer.EmitLdaImmediate((byte)folded);
+            return;
+        }
+
         switch (expr)
         {
             case IntLiteralExpr intLit:
@@ -154,6 +161,53 @@ public sealed class ExpressionEmitter(EmitContext ctx)
             }
         }
         throw new InvalidOperationException($"Unknown constant: {member.Receiver}");
+    }
+
+    /// <summary>
+    /// Attempts to evaluate an expression at compile time.
+    /// Handles arithmetic on literals and constants.
+    /// </summary>
+    public bool TryFoldConstant(ExprNode expr, out long result)
+    {
+        result = 0;
+        switch (expr)
+        {
+            case IntLiteralExpr intLit:
+                result = intLit.Value;
+                return true;
+            case IdentifierExpr ident when ctx.Symbols.TryGetConstant(ident.Name, out var cv):
+                result = cv;
+                return true;
+            case MemberAccessExpr member when member.Receiver is IdentifierExpr ri:
+                if (ctx.Symbols.TryGetEnumMember(ri.Name, member.MemberName, out var ev))
+                { result = ev; return true; }
+                if (ri.Name == "Color")
+                { result = EvalConstExpr(expr); return true; }
+                return false;
+            case BinaryExpr bin when TryFoldConstant(bin.Left, out var left) && TryFoldConstant(bin.Right, out var right):
+                result = bin.Op switch
+                {
+                    TokenKind.Plus => left + right,
+                    TokenKind.Minus => left - right,
+                    TokenKind.Star => left * right,
+                    TokenKind.Slash when right != 0 => left / right,
+                    TokenKind.Percent when right != 0 => left % right,
+                    TokenKind.Ampersand => left & right,
+                    TokenKind.Pipe => left | right,
+                    TokenKind.Caret => left ^ right,
+                    TokenKind.ShiftLeft => left << (int)right,
+                    TokenKind.ShiftRight => left >> (int)right,
+                    _ => 0
+                };
+                return bin.Op is TokenKind.Plus or TokenKind.Minus or TokenKind.Star or
+                    TokenKind.Slash or TokenKind.Percent or TokenKind.Ampersand or
+                    TokenKind.Pipe or TokenKind.Caret or TokenKind.ShiftLeft or TokenKind.ShiftRight;
+            case UnaryExpr { Op: TokenKind.Minus } neg when TryFoldConstant(neg.Operand, out var inner):
+                result = -inner;
+                return true;
+            default:
+                return false;
+        }
     }
 
     public byte EvalConstExpr(ExprNode expr) => expr switch
