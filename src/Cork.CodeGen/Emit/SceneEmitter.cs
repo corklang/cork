@@ -129,13 +129,15 @@ public sealed class SceneEmitter(EmitContext ctx)
 
         // $D011: base $1B (DEN=1, RSEL=1, YSCROLL=3), modify bits 5-6
         // $D016: base $08 (CSEL=1, XSCROLL=0), modify bit 4
+        // $D018: $15 = screen at $0400, chars at $1000 (text default)
+        //        $1D = screen at $0400, bitmap at $2000
         var (d011, d016, d018) = modeIdent.Name switch
         {
-            "text"             => ((byte)0x1B, (byte)0x08, (byte?)null),
-            "multicolorText"   => ((byte)0x1B, (byte)0x18, (byte?)null),
-            "bitmap"           => ((byte)0x3B, (byte)0x08, (byte?)0x1D),
-            "multicolorBitmap" => ((byte)0x3B, (byte)0x18, (byte?)0x1D),
-            "ecm"              => ((byte)0x5B, (byte)0x08, (byte?)null),
+            "text"             => ((byte)0x1B, (byte)0x08, (byte)0x15),
+            "multicolorText"   => ((byte)0x1B, (byte)0x18, (byte)0x15),
+            "bitmap"           => ((byte)0x3B, (byte)0x08, (byte)0x1D),
+            "multicolorBitmap" => ((byte)0x3B, (byte)0x18, (byte)0x1D),
+            "ecm"              => ((byte)0x5B, (byte)0x08, (byte)0x15),
             _ => throw new InvalidOperationException(
                 $"Unknown graphics mode: {modeIdent.Name}. " +
                 "Valid modes: text, multicolorText, bitmap, multicolorBitmap, ecm")
@@ -145,11 +147,8 @@ public sealed class SceneEmitter(EmitContext ctx)
         ctx.Buffer.EmitStaAbsolute(0xD011);
         ctx.Buffer.EmitLdaImmediate(d016);
         ctx.Buffer.EmitStaAbsolute(0xD016);
-        if (d018.HasValue)
-        {
-            ctx.Buffer.EmitLdaImmediate(d018.Value);
-            ctx.Buffer.EmitStaAbsolute(0xD018);
-        }
+        ctx.Buffer.EmitLdaImmediate(d018);
+        ctx.Buffer.EmitStaAbsolute(0xD018);
     }
 
     public void EmitSceneVar(SceneVarDeclNode decl)
