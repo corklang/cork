@@ -116,9 +116,38 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             ctx.Expressions.EmitExprToA(valueExpr);
             ctx.Buffer.EmitStaAbsolute((ushort)constAddr.Value);
         }
+        // poke: wordVar value: val — indirect indexed via ($FB),Y
+        else if (addressExpr is IdentifierExpr addrIdent && ctx.Symbols.IsWordVar(addrIdent.Name))
+        {
+            var zp = ctx.Symbols.GetLocal(addrIdent.Name);
+            ctx.Buffer.EmitLdaZeroPage(zp);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
+            ctx.Buffer.EmitLdaZeroPage((byte)(zp + 1));
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
+            ctx.Expressions.EmitExprToA(valueExpr);
+            ctx.Buffer.EmitLdyImmediate(0);
+            ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
+        }
+        // poke: (wordVar + offset) value: val — compute address, use indirect
+        else if (addressExpr is BinaryExpr { Op: Language.Lexing.TokenKind.Plus } wordAdd &&
+                 wordAdd.Left is IdentifierExpr wordBase && ctx.Symbols.IsWordVar(wordBase.Name))
+        {
+            var zp = ctx.Symbols.GetLocal(wordBase.Name);
+            // Load word address + offset into pointer
+            ctx.Expressions.EmitExprToA(wordAdd.Right);
+            ctx.Buffer.EmitClc();
+            ctx.Buffer.EmitAdcZeroPage(zp);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
+            ctx.Buffer.EmitLdaZeroPage((byte)(zp + 1));
+            ctx.Buffer.EmitAdcImmediate(0);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
+            ctx.Expressions.EmitExprToA(valueExpr);
+            ctx.Buffer.EmitLdyImmediate(0);
+            ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
+        }
         else
         {
-            throw new InvalidOperationException("poke address must be constant or constant + expression");
+            throw new InvalidOperationException("poke address must be constant, constant + expr, or word variable");
         }
     }
 
