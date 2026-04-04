@@ -201,25 +201,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
     {
         ctx.Symbols.AddGlobalName(gm.SelectorName);
         ctx.Symbols.RegisterMethodParams(gm.SelectorName, gm.Parameters);
-        foreach (var param in gm.Parameters)
-        {
-            if (param.ParamName == "") continue;
-            if (param.TypeName == "string" || param.TypeName.EndsWith("[]"))
-            {
-                // Ref param (string or array): 3 bytes (ptr_lo, ptr_hi, length)
-                var ptrLo = ctx.Symbols.AllocGlobal($"{param.ParamName}$ptr_lo");
-                var ptrHi = ctx.Symbols.AllocGlobal($"{param.ParamName}$ptr_hi");
-                var lenZp = ctx.Symbols.AllocGlobal($"{param.ParamName}$len");
-                ctx.Symbols.RegisterRefParam(param.ParamName, ptrLo, ptrHi, lenZp);
-            }
-            else
-            {
-                ctx.Symbols.AllocGlobal(param.ParamName);
-                if (SymbolTable.Is16BitType(param.TypeName))
-                    ctx.Symbols.AllocGlobal($"_{param.ParamName}_hi"); // reserve adjacent byte
-                ctx.Symbols.SetVarType(param.ParamName, param.TypeName);
-            }
-        }
+        // Allocate params in shared zone (all methods overlap — safe, non-reentrant)
+        ctx.Symbols.AllocMethodParams(gm.SelectorName, gm.Parameters);
     }
 
     private static void EmitGlobalInit(EmitContext ctx, GlobalVarDeclNode gv)
@@ -241,7 +224,10 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
     {
         var label = $"_method_{gm.SelectorName}";
         ctx.Buffer.DefineLabel(label);
+        // Temporarily install param names into locals for body emission
+        ctx.Symbols.InstallMethodParamLocals(gm.SelectorName, gm.Parameters);
         ctx.Statements.EmitBlock(gm.Body);
+        ctx.Symbols.RemoveMethodParamLocals(gm.Parameters);
         ctx.Buffer.EmitRts();
     }
 

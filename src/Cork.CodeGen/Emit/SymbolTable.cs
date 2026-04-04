@@ -21,6 +21,8 @@ public sealed class SymbolTable
     private readonly Dictionary<string, (string StructType, Dictionary<string, byte> FieldBases, int Size)> _structArrays = [];
     private readonly HashSet<string> _emittedStructMethods = [];
     private readonly Dictionary<string, List<MethodParameter>> _methodParams = [];
+    // Method param ZP addresses: selectorName → [paramName → zpAddr]
+    private readonly Dictionary<string, Dictionary<string, byte>> _methodParamZp = [];
     // String variables: name → (zpBase, length)
     private readonly Dictionary<string, (byte ZpBase, int Length)> _stringVars = [];
     // Reference parameters (string/array): name → (ptrZpLo, ptrZpHi, lenZp)
@@ -30,6 +32,9 @@ public sealed class SymbolTable
 
     private byte _nextZp = 0x02;
     private byte _globalZpEnd = 0x02;
+    // Shared param zone: all methods reuse the same ZP region for params
+    private const byte ParamZoneBase = 0x80;
+    private byte _paramZoneEnd = ParamZoneBase;
 
     // --- Zero page allocation ---
 
@@ -234,6 +239,78 @@ public sealed class SymbolTable
 
     public bool TryGetMethodParams(string selectorName, out List<MethodParameter> parameters) =>
         _methodParams.TryGetValue(selectorName, out parameters!);
+
+    /// <summary>
+    /// Allocate shared param zone ZP slots for a method's parameters.
+    /// All methods reuse the same ZP region starting at ParamZoneBase.
+    /// Each method gets sequential slots from the base — they overlap between methods
+    /// which is safe since calls are non-reentrant.
+    /// </summary>
+    public Dictionary<string, byte> AllocMethodParams(string selectorName, List<MethodParameter> parameters)
+    {
+        var zpMap = new Dictionary<string, byte>();
+        var zp = ParamZoneBase;
+        foreach (var param in parameters)
+        {
+            if (param.ParamName == "") continue;
+            if (param.TypeName == "string" || param.TypeName.EndsWith("[]"))
+            {
+                // Ref params: 3 bytes (ptr_lo, ptr_hi, len)
+                zpMap[$"{param.ParamName}$ptr_lo"] = zp++;
+                zpMap[$"{param.ParamName}$ptr_hi"] = zp++;
+                zpMap[$"{param.ParamName}$len"] = zp++;
+            }
+            else
+            {
+                zpMap[param.ParamName] = zp++;
+                if (Is16BitType(param.TypeName))
+                    zp++; // reserve hi byte (adjacent)
+            }
+        }
+        if (zp > _paramZoneEnd) _paramZoneEnd = zp;
+        _methodParamZp[selectorName] = zpMap;
+        return zpMap;
+    }
+
+    public bool TryGetMethodParamZp(string selectorName, out Dictionary<string, byte> zpMap) =>
+        _methodParamZp.TryGetValue(selectorName, out zpMap!);
+
+    /// <summary>
+    /// Temporarily install method params into locals for method body emission.
+    /// Call RemoveMethodParamLocals after emission.
+    /// </summary>
+    public void InstallMethodParamLocals(string selectorName, List<MethodParameter> parameters)
+    {
+        if (!_methodParamZp.TryGetValue(selectorName, out var zpMap)) return;
+        foreach (var param in parameters)
+        {
+            if (param.ParamName == "") continue;
+            if (zpMap.TryGetValue(param.ParamName, out var zp))
+            {
+                _locals[param.ParamName] = zp;
+                if (Is16BitType(param.TypeName))
+                    _varTypes[param.ParamName] = param.TypeName;
+            }
+            // Ref params
+            if (zpMap.TryGetValue($"{param.ParamName}$ptr_lo", out var ptrLo))
+            {
+                var ptrHi = zpMap[$"{param.ParamName}$ptr_hi"];
+                var lenZp = zpMap[$"{param.ParamName}$len"];
+                _refParams[param.ParamName] = (ptrLo, ptrHi, lenZp);
+            }
+        }
+    }
+
+    public void RemoveMethodParamLocals(List<MethodParameter> parameters)
+    {
+        foreach (var param in parameters)
+        {
+            if (param.ParamName == "") continue;
+            _locals.Remove(param.ParamName);
+            _varTypes.Remove(param.ParamName);
+            _refParams.Remove(param.ParamName);
+        }
+    }
 
     // --- Global names ---
 

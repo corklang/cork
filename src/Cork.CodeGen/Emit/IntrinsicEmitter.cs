@@ -65,7 +65,8 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             var selectorName = string.Join("", msgSend.Segments.Select(s => s.Name + ":"));
             var label = $"_method_{selectorName}";
 
-            if (ctx.Symbols.TryGetMethodParams(selectorName, out var methodParams))
+            if (ctx.Symbols.TryGetMethodParams(selectorName, out var methodParams) &&
+                ctx.Symbols.TryGetMethodParamZp(selectorName, out var paramZpMap))
             {
                 for (var i = 0; i < msgSend.Segments.Count; i++)
                 {
@@ -75,74 +76,69 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
                     var arg = msgSend.Segments[i].Argument!;
                     var param = methodParams[i];
 
-                    // String reference parameter: pass pointer + length
+                    // String/array reference parameter: pass pointer + length
                     if ((param.TypeName == "string" || param.TypeName.EndsWith("[]")) &&
-                        ctx.Symbols.TryGetRefParam(param.ParamName, out var refInfo))
+                        paramZpMap.TryGetValue($"{param.ParamName}$ptr_lo", out var ptrLo))
                     {
+                        var ptrHi = paramZpMap[$"{param.ParamName}$ptr_hi"];
+                        var lenZp = paramZpMap[$"{param.ParamName}$len"];
                         if (arg is IdentifierExpr strIdent && ctx.Symbols.TryGetStringVar(strIdent.Name, out var strVar))
                         {
-                            // String variable: pointer = ZP base ($00xx)
                             ctx.Buffer.EmitLdaImmediate(strVar.ZpBase);
-                            ctx.Buffer.EmitStaZeroPage(refInfo.PtrLo);
+                            ctx.Buffer.EmitStaZeroPage(ptrLo);
                             ctx.Buffer.EmitLdaImmediate(0);
-                            ctx.Buffer.EmitStaZeroPage(refInfo.PtrHi);
+                            ctx.Buffer.EmitStaZeroPage(ptrHi);
                             ctx.Buffer.EmitLdaImmediate((byte)strVar.Length);
-                            ctx.Buffer.EmitStaZeroPage(refInfo.LenZp);
+                            ctx.Buffer.EmitStaZeroPage(lenZp);
                         }
                         else if (arg is StringLiteralExpr strLit)
                         {
-                            // String literal: pointer = data section address
                             var dataName = $"_str_{strLit.Value.GetHashCode():X8}";
                             if (ctx.DataAddresses.TryGetValue(dataName, out var dataAddr))
                             {
                                 ctx.Buffer.EmitLdaImmediate((byte)(dataAddr & 0xFF));
-                                ctx.Buffer.EmitStaZeroPage(refInfo.PtrLo);
+                                ctx.Buffer.EmitStaZeroPage(ptrLo);
                                 ctx.Buffer.EmitLdaImmediate((byte)(dataAddr >> 8));
-                                ctx.Buffer.EmitStaZeroPage(refInfo.PtrHi);
+                                ctx.Buffer.EmitStaZeroPage(ptrHi);
                                 ctx.Buffer.EmitLdaImmediate((byte)strLit.Value.Length);
-                                ctx.Buffer.EmitStaZeroPage(refInfo.LenZp);
+                                ctx.Buffer.EmitStaZeroPage(lenZp);
                             }
                         }
                         else if (arg is IdentifierExpr arrIdent &&
                                  ctx.DataAddresses.TryGetValue(arrIdent.Name, out var arrAddr))
                         {
-                            // Const array: pointer = data section address
                             ctx.Buffer.EmitLdaImmediate((byte)(arrAddr & 0xFF));
-                            ctx.Buffer.EmitStaZeroPage(refInfo.PtrLo);
+                            ctx.Buffer.EmitStaZeroPage(ptrLo);
                             ctx.Buffer.EmitLdaImmediate((byte)(arrAddr >> 8));
-                            ctx.Buffer.EmitStaZeroPage(refInfo.PtrHi);
+                            ctx.Buffer.EmitStaZeroPage(ptrHi);
                             ctx.Buffer.EmitLdaImmediate((byte)ctx.GetConstArraySize(arrIdent.Name));
-                            ctx.Buffer.EmitStaZeroPage(refInfo.LenZp);
+                            ctx.Buffer.EmitStaZeroPage(lenZp);
                         }
                     }
-                    else if (SymbolTable.Is16BitType(param.TypeName))
+                    else if (SymbolTable.Is16BitType(param.TypeName) &&
+                             paramZpMap.TryGetValue(param.ParamName, out var wordZp))
                     {
-                        // Word/fixed parameter: store both bytes
-                        var paramZp = ctx.Symbols.GetLocal(param.ParamName);
                         if (arg is IdentifierExpr wordArg && ctx.Symbols.IsWordVar(wordArg.Name))
                         {
-                            // Pass word variable by value
                             var srcZp = ctx.Symbols.GetLocal(wordArg.Name);
                             ctx.Buffer.EmitLdaZeroPage(srcZp);
-                            ctx.Buffer.EmitStaZeroPage(paramZp);
+                            ctx.Buffer.EmitStaZeroPage(wordZp);
                             ctx.Buffer.EmitLdaZeroPage((byte)(srcZp + 1));
-                            ctx.Buffer.EmitStaZeroPage((byte)(paramZp + 1));
+                            ctx.Buffer.EmitStaZeroPage((byte)(wordZp + 1));
                         }
                         else
                         {
-                            // Literal or constant expression
                             var val = ExpressionEmitter.Resolve16BitInitializer(param.TypeName, arg);
                             ctx.Buffer.EmitLdaImmediate((byte)(val & 0xFF));
-                            ctx.Buffer.EmitStaZeroPage(paramZp);
+                            ctx.Buffer.EmitStaZeroPage(wordZp);
                             ctx.Buffer.EmitLdaImmediate((byte)(val >> 8));
-                            ctx.Buffer.EmitStaZeroPage((byte)(paramZp + 1));
+                            ctx.Buffer.EmitStaZeroPage((byte)(wordZp + 1));
                         }
                     }
-                    else
+                    else if (paramZpMap.TryGetValue(param.ParamName, out var byteZp))
                     {
-                        // Regular byte parameter
                         ctx.Expressions.EmitExprToA(arg);
-                        ctx.Buffer.EmitStaZeroPage(ctx.Symbols.GetLocal(param.ParamName));
+                        ctx.Buffer.EmitStaZeroPage(byteZp);
                     }
                 }
             }
