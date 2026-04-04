@@ -54,10 +54,57 @@ public sealed class EmitContext
     // Const array sizes (populated during code generation)
     private readonly Dictionary<string, int> _constArraySizes = [];
 
+    // Inline data (string literals etc.) — accumulated during emission
+    private readonly List<(string Name, byte[] Data)> _inlineData = [];
+    private readonly Dictionary<string, ushort> _inlineDataAddresses = [];
+
     public void RegisterConstArraySize(string name, int size) => _constArraySizes[name] = size;
     public int GetConstArraySize(string name) =>
         _constArraySizes.TryGetValue(name, out var s) ? s
             : throw new InvalidOperationException($"Unknown const array: {name}");
+
+    public void RegisterInlineData(string name, byte[] data)
+    {
+        _inlineData.Add((name, data));
+    }
+
+    public ushort GetInlineDataAddress(string name)
+    {
+        if (_inlineDataAddresses.TryGetValue(name, out var addr))
+            return addr;
+        // During first pass, return a placeholder
+        return 0xFFFF;
+    }
+
+    /// <summary>
+    /// After code emission, resolve inline data addresses and return the combined inline data bytes.
+    /// </summary>
+    public byte[] FinalizeInlineData(ushort dataStart)
+    {
+        var offset = 0;
+        foreach (var (name, data) in _inlineData)
+        {
+            _inlineDataAddresses[name] = (ushort)(dataStart + offset);
+            offset += data.Length;
+        }
+
+        var result = new byte[offset];
+        offset = 0;
+        foreach (var (_, data) in _inlineData)
+        {
+            data.CopyTo(result, offset);
+            offset += data.Length;
+        }
+        return result;
+    }
+
+    public int InlineDataSize => _inlineData.Sum(d => d.Data.Length);
+
+    public void ClearInlineData()
+    {
+        _inlineData.Clear();
+        _inlineDataAddresses.Clear();
+    }
 
     public string NextLabel(string prefix) => $"{prefix}_{_labelCounter++}";
 }

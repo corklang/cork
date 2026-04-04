@@ -128,13 +128,28 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
     /// </summary>
     private void EmitPrintAt(ExprNode posExpr, ExprNode textExpr)
     {
-        if (textExpr is not IdentifierExpr textIdent)
-            throw new InvalidOperationException("printAt text must be a const array name");
+        ushort dataAddr;
+        int arraySize;
 
-        if (!ctx.DataAddresses.TryGetValue(textIdent.Name, out var dataAddr))
-            throw new InvalidOperationException($"Unknown const array: {textIdent.Name}");
-
-        var arraySize = ctx.GetConstArraySize(textIdent.Name);
+        if (textExpr is StringLiteralExpr strLit)
+        {
+            // String literal: look up pre-registered string data
+            var dataName = $"_str_{strLit.Value.GetHashCode():X8}";
+            if (!ctx.DataAddresses.TryGetValue(dataName, out var strAddr))
+                throw new InvalidOperationException($"String not pre-registered: \"{strLit.Value}\"");
+            dataAddr = strAddr;
+            arraySize = strLit.Value.Length;
+        }
+        else if (textExpr is IdentifierExpr textIdent &&
+                 ctx.DataAddresses.TryGetValue(textIdent.Name, out var addr))
+        {
+            dataAddr = addr;
+            arraySize = ctx.GetConstArraySize(textIdent.Name);
+        }
+        else
+        {
+            throw new InvalidOperationException("printAt text must be a string literal or const array name");
+        }
 
         // Calculate screen address: $0400 + pos
         long pos = 0;
@@ -145,15 +160,13 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
 
         var screenAddr = (ushort)(0x0400 + pos);
 
-        // Emit loop: LDX #0; .loop: LDA data,X; STA screen,X; INX; CPX #len; BNE .loop
         // LDX #0; loop: LDA data,X; STA screen,X; INX; CPX #len; BNE loop
         ctx.Buffer.EmitLdxImmediate(0);
-        // Loop body: LDA(3) + STA(3) + INX(1) + CPX(2) + BNE(2) = 11 bytes
         ctx.Buffer.EmitLdaAbsoluteX(dataAddr);
         ctx.Buffer.EmitStaAbsoluteX(screenAddr);
         ctx.Buffer.EmitInx();
         ctx.Buffer.EmitCpxImmediate((byte)arraySize);
-        ctx.Buffer.EmitBne(unchecked((sbyte)(-11))); // back to LDA
+        ctx.Buffer.EmitBne(unchecked((sbyte)(-11)));
     }
 
     public void EmitPokeScreen(ExprNode offsetExpr, ExprNode valueExpr)

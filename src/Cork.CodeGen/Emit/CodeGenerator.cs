@@ -14,11 +14,17 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         // Collect const data
         var dataBytes = new List<byte>();
         var dataNames = new Dictionary<string, int>();
+        var constArraySizes = new Dictionary<string, int>();
+
+        // Collect string literals from the entire AST and convert to screen code data
+        CollectStringLiterals(program, dataBytes, dataNames, constArraySizes);
+
         foreach (var decl in program.Declarations)
         {
             if (decl is ConstArrayDeclNode constArr)
             {
                 dataNames[constArr.Name] = dataBytes.Count;
+                constArraySizes[constArr.Name] = constArr.Size;
                 foreach (var val in constArr.Values)
                 {
                     if (val is IntLiteralExpr intLit)
@@ -38,7 +44,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         var globalVars = program.Declarations.OfType<GlobalVarDeclNode>().ToList();
 
         // First pass: measure code size
-        var measuredSize = EmitAll(program, scenes, globalVars, dataNames, codeBase, 0xFFFF).Length;
+        var measuredSize = EmitAll(program, scenes, globalVars, dataNames, constArraySizes, codeBase, 0xFFFF).Length;
 
         // Second pass: emit with correct data addresses
         var dataStart = (ushort)(codeBase + measuredSize);
@@ -52,9 +58,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         foreach (var decl in program.Declarations)
             if (decl is StructDeclNode sd)
                 ctx.Symbols.RegisterStructType(sd);
-        foreach (var decl in program.Declarations)
-            if (decl is ConstArrayDeclNode ca)
-                ctx.RegisterConstArraySize(ca.Name, ca.Size);
+        foreach (var (name, size) in constArraySizes)
+            ctx.RegisterConstArraySize(name, size);
         foreach (var decl in program.Declarations)
             if (decl is EnumDeclNode ed)
                 ctx.Symbols.RegisterEnumType(ed);
@@ -90,13 +95,20 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         // Runtime library
         ctx.RuntimeLib.EmitRuntimeLibrary();
 
+        // Finalize inline data (string literals) — addresses resolved after code size is known
+        var codeSize = ctx.Buffer.Length;
+        var constDataStart = (ushort)(codeBase + codeSize);
+        var inlineDataStart = (ushort)(constDataStart + dataBytes.Count);
+        var inlineData = ctx.FinalizeInlineData(inlineDataStart);
+
         ctx.Buffer.ResolveFixups();
 
-        // Combine code + data
+        // Combine code + const data + inline data
         var code = ctx.Buffer.ToArray();
-        var result = new byte[code.Length + dataBytes.Count];
+        var result = new byte[code.Length + dataBytes.Count + inlineData.Length];
         code.CopyTo(result, 0);
         dataBytes.CopyTo(result.AsSpan()[code.Length..]);
+        inlineData.CopyTo(result, code.Length + dataBytes.Count);
         return (result, codeBase);
     }
 
@@ -114,6 +126,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
     private static byte[] EmitAll(ProgramNode program, List<SceneNode> scenes,
         List<GlobalVarDeclNode> globalVars, Dictionary<string, int> dataNames,
+        Dictionary<string, int> constArraySizes,
         ushort codeBase, ushort dataStart)
     {
         var dataAddresses = new Dictionary<string, ushort>();
@@ -127,9 +140,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         foreach (var decl in program.Declarations)
             if (decl is EnumDeclNode ed)
                 ctx.Symbols.RegisterEnumType(ed);
-        foreach (var decl in program.Declarations)
-            if (decl is ConstArrayDeclNode ca)
-                ctx.RegisterConstArraySize(ca.Name, ca.Size);
+        foreach (var (name, size) in constArraySizes)
+            ctx.RegisterConstArraySize(name, size);
         foreach (var gv in globalVars)
             ctx.Symbols.AllocGlobal(gv.Name);
         foreach (var decl in program.Declarations)
@@ -185,5 +197,65 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         ctx.Buffer.DefineLabel(label);
         ctx.Statements.EmitBlock(gm.Body);
         ctx.Buffer.EmitRts();
+    }
+
+    /// <summary>
+    /// Scan the AST for all string literals and convert them to screen code data entries.
+    /// </summary>
+    private static void CollectStringLiterals(ProgramNode program,
+        List<byte> dataBytes, Dictionary<string, int> dataNames, Dictionary<string, int> sizes)
+    {
+        var found = new HashSet<string>();
+        CollectStringsFromNode(program, found);
+        foreach (var str in found)
+        {
+            var name = $"_str_{str.GetHashCode():X8}";
+            if (dataNames.ContainsKey(name)) continue;
+            var screenCodes = ScreenCodes.FromString(str);
+            dataNames[name] = dataBytes.Count;
+            sizes[name] = screenCodes.Length;
+            dataBytes.AddRange(screenCodes);
+        }
+    }
+
+    private static void CollectStringsFromNode(AstNode node, HashSet<string> found)
+    {
+        switch (node)
+        {
+            case ProgramNode prog:
+                foreach (var d in prog.Declarations) CollectStringsFromNode(d, found);
+                break;
+            case SceneNode scene:
+                foreach (var m in scene.Members) CollectStringsFromNode(m, found);
+                break;
+            case EnterBlockNode enter: CollectStringsFromBlock(enter.Body, found); break;
+            case FrameBlockNode frame: CollectStringsFromBlock(frame.Body, found); break;
+            case ExitBlockNode exit: CollectStringsFromBlock(exit.Body, found); break;
+            case SceneMethodNode method: CollectStringsFromBlock(method.Body, found); break;
+            case GlobalMethodNode gm: CollectStringsFromBlock(gm.Body, found); break;
+        }
+    }
+
+    private static void CollectStringsFromBlock(BlockNode block, HashSet<string> found)
+    {
+        foreach (var stmt in block.Statements)
+        {
+            switch (stmt)
+            {
+                case MessageSendStmt msg:
+                    foreach (var seg in msg.Segments)
+                        if (seg.Argument is StringLiteralExpr strLit)
+                            found.Add(strLit.Value);
+                    break;
+                case IfStmt ifStmt:
+                    CollectStringsFromBlock(ifStmt.ThenBody, found);
+                    if (ifStmt.ElseBody != null) CollectStringsFromBlock(ifStmt.ElseBody, found);
+                    foreach (var (_, body) in ifStmt.ElseIfs) CollectStringsFromBlock(body, found);
+                    break;
+                case WhileStmt w: CollectStringsFromBlock(w.Body, found); break;
+                case ForStmt f: CollectStringsFromBlock(f.Body, found); break;
+                case ForEachStmt fe: CollectStringsFromBlock(fe.Body, found); break;
+            }
+        }
     }
 }
