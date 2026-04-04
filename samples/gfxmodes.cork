@@ -1,5 +1,17 @@
 // Feature: all 5 VIC-II graphics modes, cycle with joystick fire
 
+// Shared screen clearing method
+clearScreen: {
+    byte i = 0;
+    while (i < 250) {
+        poke: (0x0400 + i) value: 32;
+        poke: (0x04FA + i) value: 32;
+        poke: (0x05F4 + i) value: 32;
+        poke: (0x06EE + i) value: 32;
+        i += 1;
+    }
+}
+
 // --- Mode 1: Standard text (default) ---
 entry scene TextMode {
     hardware {
@@ -9,21 +21,28 @@ entry scene TextMode {
     }
 
     enter {
-        // Fill screen with characters
+        clearScreen:;
+        // Draw top/bottom border
         byte i = 0;
-        while (i < 250) {
-            poke: (0x0400 + i) value: i;
-            poke: (0x04FA + i) value: i;
+        while (i < 40) {
+            poke: (0x0400 + i) value: 64;
+            poke: (0x07C0 + i) value: 64;
+            poke: (0xD800 + i) value: Color.lightBlue;
+            poke: (0xDBC0 + i) value: Color.lightBlue;
             i += 1;
         }
-        // Fill color RAM
+        // printAt row*40+col: row4=160, row6=240, row9=360, row10=400, row20=800
+        printAt: 172 text: "MODE 1 OF 5";
+        printAt: 250 text: "STANDARD TEXT";
+        printAt: 365 text: "40X25 CHARACTERS";
+        printAt: 405 text: "1 COLOR PER CHARACTER";
+        printAt: 808 text: "FIRE TO CONTINUE";
+        // White color for title
         i = 0;
-        while (i < 250) {
-            poke: (0xD800 + i) value: 14;
-            poke: (0xD8FA + i) value: 14;
+        while (i < 13) {
+            poke: (0xD8F0 + i) value: Color.white;
             i += 1;
         }
-        printAt: 12 * 40 + 11 text: "STANDARD TEXT";
     }
 
     frame {
@@ -38,20 +57,27 @@ scene McTextMode {
         border: Color.black;
         background: Color.black;
         background1: Color.red;
-        background2: Color.green;
+        background2: Color.cyan;
     }
 
     enter {
+        clearScreen:;
+        printAt: 172 text: "MODE 2 OF 5";
+        printAt: 248 text: "MULTICOLOR TEXT";
+        printAt: 363 text: "4 COLORS PER CHAR";
+        printAt: 403 text: "HALF HORIZONTAL RES";
+        printAt: 806 text: "FIRE TO CONTINUE";
+        // Set color RAM bit 3 on label rows to enable multicolor
+        // row4=0xD8A0, row6=0xD8F0, row9=0xD968, row10=0xD990, row20=0xDB20
         byte i = 0;
-        while (i < 250) {
-            poke: (0x0400 + i) value: i;
-            poke: (0x04FA + i) value: i;
-            // Color RAM bit 3 enables multicolor per char
-            poke: (0xD800 + i) value: 0x0F;
-            poke: (0xD8FA + i) value: 0x0B;
+        while (i < 40) {
+            poke: (0xD8A0 + i) value: 0x07;
+            poke: (0xD8F0 + i) value: 0x0D;
+            poke: (0xD968 + i) value: 0x0F;
+            poke: (0xD990 + i) value: 0x0F;
+            poke: (0xDB20 + i) value: 0x01;
             i += 1;
         }
-        printAt: 12 * 40 + 9 text: "MULTICOLOR TEXT";
     }
 
     frame {
@@ -63,24 +89,40 @@ scene McTextMode {
 scene BitmapMode {
     hardware {
         mode: bitmap;
-        border: Color.darkGrey;
+        border: Color.black;
         background: Color.black;
     }
 
     enter {
-        // Fill bitmap at $2000 with stripe pattern
+        // Clear bitmap
         word addr = 0x2000;
         while (addr < 0x3F40) {
-            poke: addr value: 0xAA;
-            addr += 1;
-            poke: addr value: 0x55;
+            poke: addr value: 0;
             addr += 1;
         }
-        // Screen RAM = color info: high nybble = fg, low nybble = bg per cell
+        // Draw 3 horizontal white bars
+        addr = 0x2280;
+        while (addr < 0x2500) {
+            poke: addr value: 0xFF;
+            addr += 1;
+        }
+        addr = 0x2DC0;
+        while (addr < 0x3040) {
+            poke: addr value: 0xFF;
+            addr += 1;
+        }
+        addr = 0x3900;
+        while (addr < 0x3B80) {
+            poke: addr value: 0xFF;
+            addr += 1;
+        }
+        // Screen RAM = white on black per 8x8 cell
         byte i = 0;
         while (i < 250) {
-            poke: (0x0400 + i) value: 0x6E;
-            poke: (0x04FA + i) value: 0xE6;
+            poke: (0x0400 + i) value: 0x10;
+            poke: (0x04FA + i) value: 0x10;
+            poke: (0x05F4 + i) value: 0x10;
+            poke: (0x06EE + i) value: 0x10;
             i += 1;
         }
     }
@@ -95,30 +137,50 @@ scene McBitmapMode {
     hardware {
         mode: multicolorBitmap;
         border: Color.black;
-        background: Color.blue;
+        background: Color.black;
     }
 
     enter {
-        // Fill bitmap at $2000 with multicolor pattern
+        // Clear bitmap
         word addr = 0x2000;
         while (addr < 0x3F40) {
-            poke: addr value: 0x6B;
-            addr += 1;
-            poke: addr value: 0xD8;
+            poke: addr value: 0;
             addr += 1;
         }
-        // Screen RAM: high nybble = color 1, low nybble = color 2
+        // Draw 3 colored horizontal bands using different bit pairs
+        // 01=color from screen RAM hi nybble, 10=screen RAM lo nybble, 11=color RAM
+        // Top third: all 01 (0x55)
+        addr = 0x2000;
+        while (addr < 0x2A80) {
+            poke: addr value: 0x55;
+            addr += 1;
+        }
+        // Middle third: all 10 (0xAA)
+        while (addr < 0x3500) {
+            poke: addr value: 0xAA;
+            addr += 1;
+        }
+        // Bottom third: all 11 (0xFF)
+        while (addr < 0x3F40) {
+            poke: addr value: 0xFF;
+            addr += 1;
+        }
+        // Screen RAM: hi=red(2), lo=green(5) -> $25
         byte i = 0;
         while (i < 250) {
-            poke: (0x0400 + i) value: 0x27;
-            poke: (0x04FA + i) value: 0x53;
+            poke: (0x0400 + i) value: 0x25;
+            poke: (0x04FA + i) value: 0x25;
+            poke: (0x05F4 + i) value: 0x25;
+            poke: (0x06EE + i) value: 0x25;
             i += 1;
         }
-        // Color RAM = color 3 per cell
+        // Color RAM = yellow(7)
         i = 0;
         while (i < 250) {
-            poke: (0xD800 + i) value: 1;
-            poke: (0xD8FA + i) value: 5;
+            poke: (0xD800 + i) value: 7;
+            poke: (0xD8FA + i) value: 7;
+            poke: (0xD9F4 + i) value: 7;
+            poke: (0xDAEE + i) value: 7;
             i += 1;
         }
     }
@@ -140,37 +202,33 @@ scene EcmMode {
     }
 
     enter {
-        // Char code bits 6-7 select which background (0-3)
-        // Fill screen with bg0 chars + white foreground
+        // Fill screen with spaces on each of the 4 backgrounds
+        // Char bits 6-7 select background, 0-5 select char (space=32=$20)
+        // bg0=$20, bg1=$60, bg2=$A0, bg3=$E0
         byte i = 0;
         while (i < 250) {
-            poke: (0x0400 + i) value: 0x01;
-            poke: (0x04FA + i) value: 0x01;
+            // Top quarter: bg0 (blue)
+            poke: (0x0400 + i) value: 0x20;
+            // Second quarter: bg1 (red)
+            poke: (0x04FA + i) value: 0x60;
+            // Third quarter: bg2 (green)
+            poke: (0x05F4 + i) value: 0xA0;
+            // Bottom quarter: bg3 (yellow)
+            poke: (0x06EE + i) value: 0xE0;
+            // White foreground everywhere
             poke: (0xD800 + i) value: 1;
             poke: (0xD8FA + i) value: 1;
+            poke: (0xD9F4 + i) value: 1;
+            poke: (0xDAEE + i) value: 1;
             i += 1;
         }
-        // Rows 6-7: bg1 (red) — char code 0x41
-        i = 0;
-        while (i < 40) {
-            poke: (0x04F0 + i) value: 0x41;
-            poke: (0x0518 + i) value: 0x41;
-            i += 1;
-        }
-        // Rows 12-13: bg2 (green) — char code 0x81
-        i = 0;
-        while (i < 40) {
-            poke: (0x05E0 + i) value: 0x81;
-            poke: (0x0608 + i) value: 0x81;
-            i += 1;
-        }
-        // Rows 18-19: bg3 (yellow) — char code 0xC1
-        i = 0;
-        while (i < 40) {
-            poke: (0x06D0 + i) value: 0xC1;
-            poke: (0x06F8 + i) value: 0xC1;
-            i += 1;
-        }
+        // Labels — ECM only has 64 chars (codes 0-63), so A=1 not 65
+        // printAt uses screen codes where A=1, which is within range
+        // row2=80, row8=320, row14=560, row20=800
+        printAt: 90 text: "MODE 5 OF 5";
+        printAt: 326 text: "ECM MODE";
+        printAt: 564 text: "4 BACKGROUNDS";
+        printAt: 806 text: "FIRE TO RESTART";
     }
 
     frame {
