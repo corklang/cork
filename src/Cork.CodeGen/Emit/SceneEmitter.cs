@@ -100,6 +100,8 @@ public sealed class SceneEmitter(EmitContext ctx)
             {
                 "border" => (ushort)0xD020,
                 "background" => (ushort)0xD021,
+                "multicolor0" => (ushort)0xD025,
+                "multicolor1" => (ushort)0xD026,
                 _ => throw new InvalidOperationException($"Unknown hardware setting: {setting.Name}")
             };
             ctx.Buffer.EmitLdaImmediate(value);

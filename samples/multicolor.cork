@@ -1,0 +1,91 @@
+// Feature: multicolor sprite patterns (12x21, 2 bits per pixel)
+
+entry scene Demo {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+        multicolor0: Color.white;
+        multicolor1: Color.red;
+    }
+
+    // Hi-res player (24x21, 1 bit per pixel)
+    sprite 0 player {
+        data: `
+            . . . . . . . . # # # # # # . . . . . . . . . .
+            . . . . . . # # # # # # # # # # . . . . . . . .
+            . . . . # # # # # # # # # # # # # # . . . . . .
+            . . # # # # # # # # # # # # # # # # # # . . . .
+            . # # # # # # # # # # # # # # # # # # # # # . .
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            # # # # # # # # # # # # # # # # # # # # # # # #
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . . # # # # # # # # # # # # # # # # # # . . . .
+            . . . . # # # # # # # # # # # # # # . . . . . .
+            . . . . . . # # # # # # # # # # . . . . . . . .
+            . . . . . . . . # # # # # # . . . . . . . . . .
+            . . . . . . . . . . . . . . . . . . . . . . . .
+        `;
+        x: 172;
+        y: 220;
+        color: Color.green;
+    }
+
+    // Multicolor alien (12x21, 2 bits per pixel)
+    // . = transparent, 1 = multicolor0 (white), 2 = sprite color (green), 3 = multicolor1 (red)
+    sprite 1 alien {
+        data: `
+            .   .   .   .   2   2   2   2   .   .   .   .
+            .   .   .   2   2   2   2   2   2   .   .   .
+            .   .   2   2   2   2   2   2   2   2   .   .
+            .   2   2   1   1   2   2   1   1   2   2   .
+            .   2   2   1   3   2   2   1   3   2   2   .
+            2   2   2   2   2   2   2   2   2   2   2   2
+            2   2   2   2   2   2   2   2   2   2   2   2
+            2   2   2   2   2   2   2   2   2   2   2   2
+            2   2   2   3   2   2   2   2   3   2   2   2
+            2   2   2   2   3   3   3   3   2   2   2   2
+            2   2   2   2   2   2   2   2   2   2   2   2
+            .   2   2   2   2   2   2   2   2   2   2   .
+            .   .   2   2   .   2   2   .   2   2   .   .
+            .   .   2   2   .   .   .   .   2   2   .   .
+            .   .   .   .   .   .   .   .   .   .   .   .
+            .   .   .   .   .   .   .   .   .   .   .   .
+            .   .   .   .   .   .   .   .   .   .   .   .
+            .   .   .   .   .   .   .   .   .   .   .   .
+            .   .   .   .   .   .   .   .   .   .   .   .
+            .   .   .   .   .   .   .   .   .   .   .   .
+            .   .   .   .   .   .   .   .   .   .   .   .
+        `;
+        x: 100;
+        y: 80;
+        color: Color.lightGreen;
+        multicolor: true;
+    }
+
+    byte alienDir = 1;
+
+    frame {
+        if (joystick.port2.left)  { player.x -= 2; }
+        if (joystick.port2.right) { player.x += 2; }
+        if (joystick.port2.up)    { player.y -= 2; }
+        if (joystick.port2.down)  { player.y += 2; }
+
+        alien.x += alienDir;
+        if (alien.x > 220) { alienDir = 255; }
+        if (alien.x < 40)  { alienDir = 1; }
+
+        if ((player collidedWith: alien)) {
+            poke: 0xD020 value: Color.red;
+        } else {
+            poke: 0xD020 value: Color.black;
+        }
+    }
+}
