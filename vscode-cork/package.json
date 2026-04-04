@@ -2,7 +2,7 @@
   "name": "cork-lang",
   "displayName": "Cork",
   "description": "Language support for Cork, a C64 game programming language",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "cork-lang",
   "engines": {
     "vscode": "^1.85.0"
@@ -11,6 +11,7 @@
     "Programming Languages",
     "Snippets"
   ],
+  "main": "./out/extension.js",
   "contributes": {
     "languages": [
       {
@@ -41,6 +42,67 @@
         "language": "cork",
         "path": "./snippets/cork.json"
       }
+    ],
+    "configuration": {
+      "title": "Cork",
+      "properties": {
+        "cork.compilerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Cork compiler. If empty, uses 'dotnet run --project <detected path>' or 'cork' on PATH."
+        },
+        "cork.buildOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically compile .cork files on save and show diagnostics."
+        }
+      }
+    },
+    "taskDefinitions": [
+      {
+        "type": "cork",
+        "required": ["file"],
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "The .cork source file to compile"
+          },
+          "output": {
+            "type": "string",
+            "description": "Output .prg file path"
+          }
+        }
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "cork",
+        "owner": "cork",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(?:Error|Warning):\\s*(.+)\\((\\d+),(\\d+)\\):\\s*(.+)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "message": 4
+        }
+      }
+    ],
+    "commands": [
+      {
+        "command": "cork.build",
+        "title": "Cork: Build Current File"
+      }
     ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
   }
 }
