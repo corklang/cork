@@ -188,6 +188,15 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 EmitExprToA(bin.Left);
                 EmitBitwiseOp(0x49, 0x45, bin.Right); // EOR #imm / EOR zp
                 break;
+            case TokenKind.Star:
+                EmitDivMul(bin, isMul: true);
+                break;
+            case TokenKind.Slash:
+                EmitDivMul(bin, isMul: false);
+                break;
+            case TokenKind.Percent:
+                EmitModulo(bin);
+                break;
             case TokenKind.ShiftLeft:
                 EmitExprToA(bin.Left);
                 if (TryFoldConstant(bin.Right, out var shlCount))
@@ -207,6 +216,47 @@ public sealed class ExpressionEmitter(EmitContext ctx)
             default:
                 throw new InvalidOperationException($"Unsupported binary operator in expression: {bin.Op}");
         }
+    }
+
+    private void EmitDivMul(BinaryExpr bin, bool isMul)
+    {
+        if (isMul)
+        {
+            // 8x8 multiply: result low byte in A
+            ctx.Runtime.Add("mul8x8");
+            EmitExprToA(bin.Left);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);
+            EmitExprToA(bin.Right);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);
+            ctx.Buffer.EmitJsrForward("_rt_mul8x8");
+            // Result: lo in ZpMulB (after shifts), hi in ZpMulResultHi
+            // For byte multiply, we want the low byte
+            ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulResultLo);
+        }
+        else
+        {
+            // 8÷8 divide: quotient in A
+            ctx.Runtime.Add("div8");
+            EmitExprToA(bin.Left);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);
+            EmitExprToA(bin.Right);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);
+            ctx.Buffer.EmitJsrForward("_rt_div8");
+            // A = quotient
+        }
+    }
+
+    private void EmitModulo(BinaryExpr bin)
+    {
+        // 8÷8 divide, return remainder
+        ctx.Runtime.Add("div8");
+        EmitExprToA(bin.Left);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);
+        EmitExprToA(bin.Right);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);
+        ctx.Buffer.EmitJsrForward("_rt_div8");
+        // Quotient in A, remainder in ZpDivRemainder — load remainder
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpDivRemainder);
     }
 
     private void EmitBitwiseOp(byte immOpcode, byte zpOpcode, ExprNode operand)

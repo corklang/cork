@@ -818,6 +818,42 @@ import Cork.Text;       // text rendering helpers
 
 ---
 
+## Expressions & Operators
+
+### Arithmetic
+
+| Op | Example | Notes |
+|----|---------|-------|
+| `+` | `x + 3` | 8-bit add (CLC/ADC). 16-bit for word/fixed types. |
+| `-` | `x - 1` | 8-bit subtract (SEC/SBC). 16-bit for word/fixed. |
+| `*` | `x * 5` | 8×8→8 multiply (runtime library, ~150 cycles). Constant operands fold at compile time. |
+| `/` | `x / 10` | 8÷8 unsigned divide (runtime library, ~200 cycles). Returns quotient. |
+| `%` | `x % 10` | 8÷8 unsigned modulo (same divide routine). Returns remainder. |
+
+Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=` all supported.
+
+### Bitwise
+
+| Op | Example | Notes |
+|----|---------|-------|
+| `&` | `x & 0xF0` | AND |
+| `\|` | `x \| 0x01` | OR |
+| `^` | `x ^ 0xFF` | XOR |
+| `<<` | `x << 3` | Shift left (count must be constant, emits N × ASL A) |
+| `>>` | `x >> 2` | Shift right (count must be constant, emits N × LSR A) |
+
+Compound assignment: `&=`, `|=`, `^=`, `<<=`, `>>=` all supported.
+
+### Comparison
+
+`==`, `!=`, `<`, `>`, `<=`, `>=` — all work for byte and word types. Word comparisons use high-byte-first two-byte compare sequences.
+
+### Constant Folding
+
+Expressions where all operands are literals or `const` values are evaluated at compile time. `12 * 40 + 15` folds to `495` — zero runtime cost. All arithmetic, bitwise, and shift operators are foldable.
+
+---
+
 ## Control Flow
 
 ### If / Else

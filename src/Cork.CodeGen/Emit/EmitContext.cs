@@ -30,6 +30,7 @@ public sealed class EmitContext
     public const byte ZpFixedResB1 = 0xF9;
     public const byte ZpFixedResB2 = 0xFA;
     public const byte ZpSignFlag = 0xEF;
+    public const byte ZpDivRemainder = 0xEE;
 
     // Sub-emitters (set after construction to break circular dependencies)
     public ExpressionEmitter Expressions { get; set; } = null!;

@@ -213,6 +213,35 @@ public sealed class StatementEmitter(EmitContext ctx)
                 ctx.Expressions.EmitSbcValue(assign.Value);
                 ctx.Buffer.EmitStaZeroPage(zp);
                 break;
+            case TokenKind.StarEqual:
+                ctx.Runtime.Add("mul8x8");
+                ctx.Buffer.EmitLdaZeroPage(zp);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);
+                ctx.Expressions.EmitExprToA(assign.Value);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);
+                ctx.Buffer.EmitJsrForward("_rt_mul8x8");
+                ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulResultLo);
+                ctx.Buffer.EmitStaZeroPage(zp);
+                break;
+            case TokenKind.SlashEqual:
+                ctx.Runtime.Add("div8");
+                ctx.Buffer.EmitLdaZeroPage(zp);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);
+                ctx.Expressions.EmitExprToA(assign.Value);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);
+                ctx.Buffer.EmitJsrForward("_rt_div8");
+                ctx.Buffer.EmitStaZeroPage(zp); // A = quotient
+                break;
+            case TokenKind.PercentEqual:
+                ctx.Runtime.Add("div8");
+                ctx.Buffer.EmitLdaZeroPage(zp);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);
+                ctx.Expressions.EmitExprToA(assign.Value);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);
+                ctx.Buffer.EmitJsrForward("_rt_div8");
+                ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpDivRemainder);
+                ctx.Buffer.EmitStaZeroPage(zp); // remainder
+                break;
             default:
                 throw new InvalidOperationException($"Phase 1: unsupported assignment op {assign.Op}");
         }
