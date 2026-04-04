@@ -73,12 +73,12 @@ public static class ReachabilityAnalysis
             if (allConstArrays.Contains(id)) constArrays.Add(id);
         }
 
-        // Sprite data: 63-byte const arrays referenced as sprite data need their
-        // matching pointer globals (found by naming convention in EmitSpriteCopies/SceneEmitter).
-        // If the array is reachable, include the pointer global too.
+        // Sprite data: 63-byte const arrays are copied by EmitSpriteCopies which
+        // finds them by scanning all ConstArrayDeclNode and matching pointer globals
+        // by naming convention. Include array + pointer if either side is reachable.
         foreach (var ca in program.Declarations.OfType<ConstArrayDeclNode>())
         {
-            if (ca.Size != 63 || !constArrays.Contains(ca.Name)) continue;
+            if (ca.Size != 63) continue;
             string[] ptrNames = [
                 ca.Name.Replace("Data", "Ptr"),
                 ca.Name.EndsWith("Sprite") ? ca.Name[..^6] + "Ptr" : "",
@@ -86,8 +86,11 @@ public static class ReachabilityAnalysis
             ];
             foreach (var ptrName in ptrNames)
             {
-                if (ptrName != "" && allGlobalVars.Contains(ptrName))
+                if (ptrName == "" || !allGlobalVars.Contains(ptrName)) continue;
+                // Include both if either the array or pointer is referenced
+                if (constArrays.Contains(ca.Name) || identifiers.Contains(ptrName))
                 {
+                    constArrays.Add(ca.Name);
                     globalVars.Add(ptrName);
                     break;
                 }
