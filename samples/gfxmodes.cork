@@ -145,47 +145,38 @@ scene McBitmapMode {
     }
 
     enter {
-        // Clear bitmap
+        // Bitmap rows are 320 bytes (40 cells × 8 bytes each)
+        // 25 rows total. Split into 3 bands: 8 + 9 + 8 rows
+        // Row boundaries: 8*320=2560, 17*320=5440
+        // Band 1: $2000-$29FF, Band 2: $2A00-$3540, Band 3: $3540-$3F40
+
+        // Band 1: bit pair 01 = screen RAM hi nybble color (red)
         word addr = 0x2000;
-        while (addr < 0x3F40) {
-            poke: addr value: 0;
-            addr += 1;
-        }
-        // Draw 3 colored horizontal bands using different bit pairs
-        // 01=color from screen RAM hi nybble, 10=screen RAM lo nybble, 11=color RAM
-        // Top third: all 01 (0x55)
-        addr = 0x2000;
-        while (addr < 0x2A80) {
+        while (addr < 0x2A00) {
             poke: addr value: 0x55;
             addr += 1;
         }
-        // Middle third: all 10 (0xAA)
-        while (addr < 0x3500) {
+        // Band 2: bit pair 10 = screen RAM lo nybble color (green)
+        while (addr < 0x3540) {
             poke: addr value: 0xAA;
             addr += 1;
         }
-        // Bottom third: all 11 (0xFF)
+        // Band 3: bit pair 11 = color RAM color (yellow)
         while (addr < 0x3F40) {
             poke: addr value: 0xFF;
             addr += 1;
         }
         // Screen RAM: hi=red(2), lo=green(5) -> $25
-        byte i = 0;
-        while (i < 250) {
-            poke: (0x0400 + i) value: 0x25;
-            poke: (0x04FA + i) value: 0x25;
-            poke: (0x05F4 + i) value: 0x25;
-            poke: (0x06EE + i) value: 0x25;
-            i += 1;
-        }
         // Color RAM = yellow(7)
-        i = 0;
-        while (i < 250) {
-            poke: (0xD800 + i) value: 7;
-            poke: (0xD8FA + i) value: 7;
-            poke: (0xD9F4 + i) value: 7;
-            poke: (0xDAEE + i) value: 7;
-            i += 1;
+        addr = 0x0400;
+        while (addr < 0x07E8) {
+            poke: addr value: 0x25;
+            addr += 1;
+        }
+        addr = 0xD800;
+        while (addr < 0xDBE8) {
+            poke: addr value: 7;
+            addr += 1;
         }
     }
 
@@ -207,28 +198,36 @@ scene EcmMode {
 
     enter {
         // Fill screen with spaces on each of the 4 backgrounds
-        // Char bits 6-7 select background, 0-5 select char (space=32=$20)
-        // bg0=$20, bg1=$60, bg2=$A0, bg3=$E0
-        byte i = 0;
-        while (i < 250) {
-            // Top quarter: bg0 (blue)
-            poke: (0x0400 + i) value: 0x20;
-            // Second quarter: bg1 (red)
-            poke: (0x04FA + i) value: 0x60;
-            // Third quarter: bg2 (green)
-            poke: (0x05F4 + i) value: 0xA0;
-            // Bottom quarter: bg3 (yellow)
-            poke: (0x06EE + i) value: 0xE0;
-            // White foreground everywhere
-            poke: (0xD800 + i) value: 1;
-            poke: (0xD8FA + i) value: 1;
-            poke: (0xD9F4 + i) value: 1;
-            poke: (0xDAEE + i) value: 1;
-            i += 1;
+        // Char bits 6-7 select background: bg0=$20, bg1=$60, bg2=$A0, bg3=$E0
+        // 25 rows split: 6+7+6+6 rows = 240+280+240+240 chars
+        // Row 0-5:   $0400-$04EF (bg0 blue)
+        // Row 6-12:  $04F0-$0607 (bg1 red)
+        // Row 13-18: $0608-$06F7 (bg2 green)
+        // Row 19-24: $06F8-$07E7 (bg3 yellow)
+        word addr = 0x0400;
+        while (addr < 0x04F0) {
+            poke: addr value: 0x20;
+            addr += 1;
         }
-        // Labels — ECM only has 64 chars (codes 0-63), so A=1 not 65
-        // printAt uses screen codes where A=1, which is within range
-        // row2=80, row8=320, row14=560, row20=800
+        while (addr < 0x0608) {
+            poke: addr value: 0x60;
+            addr += 1;
+        }
+        while (addr < 0x06F8) {
+            poke: addr value: 0xA0;
+            addr += 1;
+        }
+        while (addr < 0x07E8) {
+            poke: addr value: 0xE0;
+            addr += 1;
+        }
+        // White foreground everywhere
+        addr = 0xD800;
+        while (addr < 0xDBE8) {
+            poke: addr value: 1;
+            addr += 1;
+        }
+        // Labels: row2=80, row8=320, row14=560, row20=800
         printAt: 90 text: "MODE 5 OF 5";
         printAt: 326 text: "ECM MODE";
         printAt: 564 text: "4 BACKGROUNDS";
