@@ -59,7 +59,8 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
                     var param = methodParams[i];
 
                     // String reference parameter: pass pointer + length
-                    if (param.TypeName == "string" && ctx.Symbols.TryGetRefParam(param.ParamName, out var refInfo))
+                    if ((param.TypeName == "string" || param.TypeName.EndsWith("[]")) &&
+                        ctx.Symbols.TryGetRefParam(param.ParamName, out var refInfo))
                     {
                         if (arg is IdentifierExpr strIdent && ctx.Symbols.TryGetStringVar(strIdent.Name, out var strVar))
                         {
@@ -84,6 +85,17 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
                                 ctx.Buffer.EmitLdaImmediate((byte)strLit.Value.Length);
                                 ctx.Buffer.EmitStaZeroPage(refInfo.LenZp);
                             }
+                        }
+                        else if (arg is IdentifierExpr arrIdent &&
+                                 ctx.DataAddresses.TryGetValue(arrIdent.Name, out var arrAddr))
+                        {
+                            // Const array: pointer = data section address
+                            ctx.Buffer.EmitLdaImmediate((byte)(arrAddr & 0xFF));
+                            ctx.Buffer.EmitStaZeroPage(refInfo.PtrLo);
+                            ctx.Buffer.EmitLdaImmediate((byte)(arrAddr >> 8));
+                            ctx.Buffer.EmitStaZeroPage(refInfo.PtrHi);
+                            ctx.Buffer.EmitLdaImmediate((byte)ctx.GetConstArraySize(arrIdent.Name));
+                            ctx.Buffer.EmitStaZeroPage(refInfo.LenZp);
                         }
                     }
                     else

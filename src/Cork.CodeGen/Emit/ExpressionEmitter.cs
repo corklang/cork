@@ -162,8 +162,16 @@ public sealed class ExpressionEmitter(EmitContext ctx)
         switch (expr)
         {
             case IntLiteralExpr intLit: ctx.Buffer.EmitAdcImmediate((byte)intLit.Value); break;
-            case IdentifierExpr ident: ctx.Buffer.EmitAdcZeroPage(ctx.Symbols.GetLocal(ident.Name)); break;
-            default: throw new InvalidOperationException("Phase 1: ADC operand must be simple");
+            case IdentifierExpr ident when !ctx.Symbols.IsWordVar(ident.Name):
+                ctx.Buffer.EmitAdcZeroPage(ctx.Symbols.GetLocal(ident.Name)); break;
+            default:
+                // Complex operand: save A, evaluate operand, store to temp, restore A, ADC temp
+                ctx.Buffer.EmitPha();
+                EmitExprToA(expr);
+                ctx.Buffer.EmitStaZeroPage(0x0F); // temp
+                ctx.Buffer.EmitPla();
+                ctx.Buffer.EmitAdcZeroPage(0x0F);
+                break;
         }
     }
 

@@ -97,7 +97,7 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
             if (Check(TokenKind.OpenParen))
             {
                 Advance();
-                var paramType = Advance().Text;
+                var paramType = ParseParamType();
                 var paramName = Expect(TokenKind.Identifier, "parameter name").Text;
                 Expect(TokenKind.CloseParen, ")");
                 parameters.Add(new MethodParameter(selectorName, paramType, paramName));
@@ -202,7 +202,7 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
             if (Check(TokenKind.OpenParen))
             {
                 Advance();
-                var paramType = Advance().Text;
+                var paramType = ParseParamType();
                 var paramName = Expect(TokenKind.Identifier, "parameter name").Text;
                 Expect(TokenKind.CloseParen, ")");
                 parameters.Add(new MethodParameter(selectorName, paramType, paramName));
@@ -476,7 +476,7 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
             if (Check(TokenKind.OpenParen))
             {
                 Advance(); // (
-                var paramType = Advance().Text;
+                var paramType = ParseParamType();
                 var paramName = Expect(TokenKind.Identifier, "parameter name").Text;
                 Expect(TokenKind.CloseParen, ")");
                 parameters.Add(new MethodParameter(selectorName, paramType, paramName));
@@ -1070,6 +1070,20 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
     /// because identifier-colon is not a valid continuation of a binary expression.
     /// </summary>
     private ExprNode ParseMessageArgExpression() => ParseExpression();
+
+    /// <summary>
+    /// Parse a parameter type, handling array suffix: byte[] → "byte[]"
+    /// </summary>
+    private string ParseParamType()
+    {
+        var typeName = Advance().Text;
+        if (TryConsume(TokenKind.OpenBracket))
+        {
+            Expect(TokenKind.CloseBracket, "]");
+            typeName += "[]";
+        }
+        return typeName;
+    }
 
     // ============================================================
     // Helpers

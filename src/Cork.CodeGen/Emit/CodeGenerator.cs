@@ -172,9 +172,9 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         foreach (var param in gm.Parameters)
         {
             if (param.ParamName == "") continue;
-            if (param.TypeName == "string")
+            if (param.TypeName == "string" || param.TypeName.EndsWith("[]"))
             {
-                // String ref param: 3 bytes (ptr_lo, ptr_hi, length)
+                // Ref param (string or array): 3 bytes (ptr_lo, ptr_hi, length)
                 var ptrLo = ctx.Symbols.AllocGlobal($"{param.ParamName}$ptr_lo");
                 var ptrHi = ctx.Symbols.AllocGlobal($"{param.ParamName}$ptr_hi");
                 var lenZp = ctx.Symbols.AllocGlobal($"{param.ParamName}$len");

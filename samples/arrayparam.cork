@@ -1,0 +1,41 @@
+// Feature: array reference parameters
+
+// Generic function that displays any byte array at a screen position
+displayData: (byte[] data) at: (word pos) {
+    for (byte i = 0; i < data.length; i += 1) {
+        poke: pos value: data[i];
+        pos += 1;
+    }
+}
+
+// Sum all values in an array
+byte sumArray: (byte[] data) {
+    byte total = 0;
+    for (byte i = 0; i < data.length; i += 1) {
+        total += data[i];
+    }
+    return total;
+}
+
+entry scene Demo {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+    }
+
+    enter {
+        // Pass different const arrays to the same function
+        displayData: message at: 0x0400;
+        displayData: pattern at: 0x0428;
+
+        // Use return value from array function
+        byte s = (sumArray: values);
+        poke: 0xD020 value: s;
+    }
+
+    frame {}
+}
+
+const byte[5] message = { 8, 5, 12, 12, 15 };
+const byte[10] pattern = { 81, 32, 81, 32, 81, 32, 81, 32, 81, 32 };
+const byte[4] values = { 1, 2, 3, 4 };
