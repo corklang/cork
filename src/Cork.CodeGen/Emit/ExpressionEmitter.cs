@@ -21,7 +21,12 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 break;
 
             case IdentifierExpr ident:
-                if (ctx.Symbols.TryGetConstant(ident.Name, out var constVal))
+                if (ctx.ForEachVar is { } fev && fev.Name == ident.Name)
+                {
+                    ctx.Buffer.EmitLdxZeroPage(fev.IndexZp);
+                    ctx.Buffer.EmitLdaAbsoluteX(fev.DataAddr);
+                }
+                else if (ctx.Symbols.TryGetConstant(ident.Name, out var constVal))
                     ctx.Buffer.EmitLdaImmediate((byte)constVal);
                 else if (ctx.Symbols.IsWordVar(ident.Name))
                     ctx.Buffer.EmitLdaZeroPage((byte)(ctx.Symbols.GetLocal(ident.Name) + 1));
@@ -49,6 +54,8 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 break;
 
             case MemberAccessExpr member:
+                if (TryResolveForEachStructField(member))
+                    break; // already emitted
                 if (TryResolveStructField(member, out var fieldZp))
                     ctx.Buffer.EmitLdaZeroPage(fieldZp);
                 else
@@ -57,6 +64,12 @@ public sealed class ExpressionEmitter(EmitContext ctx)
 
             case CastExpr cast:
                 EmitCast(cast);
+                break;
+
+            case MessageSendExpr msgExpr:
+                // Emit as a method call (JSR) — return value is left in A
+                ctx.Intrinsics.EmitMessageSend(new MessageSendStmt(
+                    msgExpr.Receiver, msgExpr.Segments, msgExpr.Location));
                 break;
 
             default:
@@ -149,6 +162,26 @@ public sealed class ExpressionEmitter(EmitContext ctx)
         MemberAccessExpr member => ResolveMemberConstant(member),
         _ => throw new InvalidOperationException($"Cannot evaluate constant: {expr.GetType().Name}")
     };
+
+    /// <summary>
+    /// Handle e.x where e is a for-each struct variable.
+    /// Emits LDX idx; LDA fieldBase,X using zero-page indexed addressing.
+    /// </summary>
+    private bool TryResolveForEachStructField(MemberAccessExpr member)
+    {
+        if (ctx.ForEachStructVar is { } fesv &&
+            member.Receiver is IdentifierExpr ident &&
+            ident.Name == fesv.Name &&
+            fesv.FieldBases.TryGetValue(member.MemberName, out var fieldBase))
+        {
+            ctx.Buffer.EmitLdxZeroPage(fesv.IndexZp);
+            // LDA zp,X — zero-page indexed
+            ctx.Buffer.EmitByte(0xB5); // LDA zp,X opcode
+            ctx.Buffer.EmitByte(fieldBase);
+            return true;
+        }
+        return false;
+    }
 
     public bool TryResolveStructField(MemberAccessExpr member, out byte zpAddr)
     {

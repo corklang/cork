@@ -17,9 +17,11 @@ public sealed class StatementEmitter(EmitContext ctx)
             case WhileStmt whileStmt: ctx.ControlFlow.EmitWhile(whileStmt); break;
             case IfStmt ifStmt: ctx.ControlFlow.EmitIf(ifStmt); break;
             case ForStmt forStmt: ctx.ControlFlow.EmitFor(forStmt); break;
+            case ForEachStmt forEach: ctx.ControlFlow.EmitForEach(forEach); break;
             case SwitchStmt switchStmt: ctx.ControlFlow.EmitSwitch(switchStmt); break;
             case MessageSendStmt msgSend: ctx.Intrinsics.EmitMessageSend(msgSend); break;
             case GoStmt goStmt: ctx.Buffer.EmitJmpForward($"_scene_{goStmt.SceneName}"); break;
+            case ReturnStmt ret: EmitReturn(ret); break;
             case BreakStmt: ctx.ControlFlow.EmitBreak(); break;
             case ContinueStmt: ctx.ControlFlow.EmitContinue(); break;
             default: throw new InvalidOperationException($"Unsupported statement: {stmt.GetType().Name}");
@@ -30,6 +32,13 @@ public sealed class StatementEmitter(EmitContext ctx)
     {
         foreach (var stmt in block.Statements)
             EmitStatement(stmt);
+    }
+
+    private void EmitReturn(ReturnStmt ret)
+    {
+        if (ret.Value != null)
+            ctx.Expressions.EmitExprToA(ret.Value);
+        ctx.Buffer.EmitRts();
     }
 
     public void EmitVarDecl(VarDeclStmt decl)
@@ -104,6 +113,13 @@ public sealed class StatementEmitter(EmitContext ctx)
         else if (assign.Target is MemberAccessExpr member && ctx.Expressions.TryResolveStructField(member, out var fieldZp))
         {
             zp = fieldZp;
+        }
+        // Indexed struct array field: enemies[0].x = 5;
+        else if (assign.Target is MemberAccessExpr { Receiver: IndexExpr { Receiver: IdentifierExpr arrIdent, Index: IntLiteralExpr idxLit } } arrMember &&
+                 ctx.Symbols.TryGetStructArray(arrIdent.Name, out var arrInfo) &&
+                 arrInfo.FieldBases.TryGetValue(arrMember.MemberName, out var fieldBase))
+        {
+            zp = (byte)(fieldBase + (int)idxLit.Value);
         }
         else
         {

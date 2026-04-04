@@ -1,0 +1,30 @@
+// Feature: struct initializer syntax
+
+struct Point {
+    byte x = 0;
+    byte y = 0;
+}
+
+entry scene Demo {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+    }
+
+    // Default init
+    Point origin;
+
+    // Override specific fields
+    var cursor = Point { x = 20, y = 12 };
+
+    enter {
+        poke: 0x0400 + origin.x value: 81;
+        poke: 0x0400 + cursor.x value: 42;
+
+        // Show cursor.y as border color
+        poke: 0xD020 value: cursor.y;
+    }
+
+    frame {
+    }
+}

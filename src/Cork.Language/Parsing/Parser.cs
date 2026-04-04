@@ -287,8 +287,10 @@ public sealed class Parser(List<Token> tokens)
         // Scene-local variable: type name [= expr]; (primitive or struct type)
         if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && !PeekIs(2, TokenKind.Colon))
             return ParseSceneVarDecl();
-        // Struct-typed variable: StructName varName;
+        // Struct-typed variable: StructName varName; or StructName[N] varName;
         if (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Identifier) && !PeekIs(2, TokenKind.Colon))
+            return ParseSceneVarDecl();
+        if (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.OpenBracket))
             return ParseSceneVarDecl();
 
         // Scene method with return type: type name: ...
@@ -376,12 +378,24 @@ public sealed class Parser(List<Token> tokens)
         var isConst = _nextIsConst;
         _nextIsConst = false;
         var typeName = Advance().Text;
+
+        // Check for array: TypeName[N]
+        var arraySize = 0;
+        if (TryConsume(TokenKind.OpenBracket))
+        {
+            var sizeExpr = ParseExpression();
+            arraySize = sizeExpr is IntLiteralExpr intLit
+                ? (int)intLit.Value
+                : throw Error("Array size must be an integer literal");
+            Expect(TokenKind.CloseBracket, "]");
+        }
+
         var name = Expect(TokenKind.Identifier, "name").Text;
         ExprNode? init = null;
         if (TryConsume(TokenKind.Equal))
             init = ParseExpression();
         Expect(TokenKind.Semicolon, ";");
-        return new SceneVarDeclNode(typeName, name, init, isConst, loc);
+        return new SceneVarDeclNode(typeName, name, init, isConst, arraySize, loc);
     }
 
     private SceneMethodNode ParseSceneMethod()
@@ -516,13 +530,24 @@ public sealed class Parser(List<Token> tokens)
         return new SwitchStmt(subject, cases, defaultBody, isFallthrough, loc);
     }
 
-    private ForStmt ParseFor()
+    private StmtNode ParseFor()
     {
         var loc = CurrentLocation;
         Expect(TokenKind.ForKw, "for");
         Expect(TokenKind.OpenParen, "(");
 
-        // Init: variable declaration (without semicolon parsed by ParseLocalVarDecl, we handle ; here)
+        // For-each: for (name in collection)
+        if (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.InKw))
+        {
+            var varName = Advance().Text;
+            Advance(); // consume 'in'
+            var collection = ParseExpression();
+            Expect(TokenKind.CloseParen, ")");
+            var feBody = ParseBlock();
+            return new ForEachStmt(varName, collection, feBody, loc);
+        }
+
+        // C-style for
         var init = ParseLocalVarDeclForInit();
         Expect(TokenKind.Semicolon, ";");
 
@@ -910,6 +935,24 @@ public sealed class Parser(List<Token> tokens)
 
         if (Check(TokenKind.Identifier))
         {
+            // Check for struct initializer: TypeName { field = value, ... }
+            if (PeekIs(1, TokenKind.OpenBrace) && char.IsUpper(Current.Text[0]))
+            {
+                var typeName = Advance().Text;
+                Advance(); // consume {
+                var fieldInits = new List<(string, ExprNode)>();
+                while (!Check(TokenKind.CloseBrace) && !IsAtEnd)
+                {
+                    var fieldName = Expect(TokenKind.Identifier, "field name").Text;
+                    Expect(TokenKind.Equal, "=");
+                    var value = ParseExpression();
+                    fieldInits.Add((fieldName, value));
+                    TryConsume(TokenKind.Comma);
+                }
+                Expect(TokenKind.CloseBrace, "}");
+                return new StructInitExpr(typeName, fieldInits, loc);
+            }
+
             var name = Advance().Text;
             return new IdentifierExpr(name, loc);
         }
@@ -924,6 +967,31 @@ public sealed class Parser(List<Token> tokens)
                 var segments = ParseMessageSegments();
                 Expect(TokenKind.CloseParen, ")");
                 return new MessageSendExpr(expr, segments, loc);
+            }
+
+            // No-receiver message send: (name: arg ...)
+            if (expr is IdentifierExpr nameExpr && Check(TokenKind.Colon))
+            {
+                Advance(); // consume colon
+                var segments = new List<SelectorSegment>();
+                if (Check(TokenKind.CloseParen))
+                {
+                    segments.Add(new SelectorSegment(nameExpr.Name, null));
+                }
+                else
+                {
+                    var firstArg = ParseMessageArgExpression();
+                    segments.Add(new SelectorSegment(nameExpr.Name, firstArg));
+                    while (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Colon))
+                    {
+                        var segName = Advance().Text;
+                        Advance();
+                        segments.Add(new SelectorSegment(segName,
+                            Check(TokenKind.CloseParen) ? null : ParseMessageArgExpression()));
+                    }
+                }
+                Expect(TokenKind.CloseParen, ")");
+                return new MessageSendExpr(null!, segments, loc);
             }
 
             Expect(TokenKind.CloseParen, ")");

@@ -16,6 +16,8 @@ public sealed class SymbolTable
     private readonly Dictionary<string, Dictionary<string, long>> _enumTypes = [];
     private readonly Dictionary<string, StructDeclNode> _structTypes = [];
     private readonly Dictionary<string, (string StructType, Dictionary<string, byte> Fields)> _structInstances = [];
+    // Struct arrays: name → (structType, fieldBases, arraySize)
+    private readonly Dictionary<string, (string StructType, Dictionary<string, byte> FieldBases, int Size)> _structArrays = [];
     private readonly HashSet<string> _emittedStructMethods = [];
     private readonly Dictionary<string, List<MethodParameter>> _methodParams = [];
 
@@ -43,6 +45,25 @@ public sealed class SymbolTable
         _locals[name] = addr;
         _varTypes[name] = "word";
         return addr;
+    }
+
+    public byte AllocArrayZeroPage(string name, int count)
+    {
+        var addr = _nextZp;
+        _nextZp += (byte)count;
+        if (_nextZp >= 0xEF) throw new InvalidOperationException("Out of zero page slots");
+        _locals[name] = addr;
+        return addr;
+    }
+
+    public void RegisterStructArray(string name, string structType, Dictionary<string, byte> fieldBases, int size)
+    {
+        _structArrays[name] = (structType, fieldBases, size);
+    }
+
+    public bool TryGetStructArray(string name, out (string StructType, Dictionary<string, byte> FieldBases, int Size) info)
+    {
+        return _structArrays.TryGetValue(name, out info);
     }
 
     public void AllocGlobal(string name)
@@ -108,6 +129,7 @@ public sealed class SymbolTable
         _varTypes.Clear();
         _constants.Clear();
         _structInstances.Clear();
+        _structArrays.Clear();
         _emittedStructMethods.Clear();
         foreach (var (name, zp) in _globals)
             _locals[name] = zp;

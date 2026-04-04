@@ -1,0 +1,46 @@
+// Feature: return with value from methods
+
+struct Player {
+    byte x = 20;
+    byte y = 12;
+
+    byte getX: {
+        return x;
+    }
+
+    byte getY: {
+        return y;
+    }
+
+    byte getScreenPos: {
+        // y * 40 + x (using shifts: y*32 + y*8 + x)
+        // Too complex for now, just return x
+        return x;
+    }
+}
+
+byte addValues: (byte a) and: (byte b) {
+    return a + b;
+}
+
+entry scene Demo {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+    }
+
+    Player player;
+
+    enter {
+        // Use return value from struct method
+        byte px = (player getX:);
+        poke: 0x0400 + px value: 81;
+
+        // Use return value from global method
+        byte sum = (addValues: 3 and: 7);
+        poke: 0xD020 value: sum;
+    }
+
+    frame {
+    }
+}

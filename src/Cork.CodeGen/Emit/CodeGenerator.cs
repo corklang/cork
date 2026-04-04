@@ -48,10 +48,13 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
         var ctx = CreateContext(codeBase, dataAddresses);
 
-        // Register struct types
+        // Register struct types and const array sizes
         foreach (var decl in program.Declarations)
             if (decl is StructDeclNode sd)
                 ctx.Symbols.RegisterStructType(sd);
+        foreach (var decl in program.Declarations)
+            if (decl is ConstArrayDeclNode ca)
+                ctx.RegisterConstArraySize(ca.Name, ca.Size);
         foreach (var decl in program.Declarations)
             if (decl is EnumDeclNode ed)
                 ctx.Symbols.RegisterEnumType(ed);
@@ -124,6 +127,9 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         foreach (var decl in program.Declarations)
             if (decl is EnumDeclNode ed)
                 ctx.Symbols.RegisterEnumType(ed);
+        foreach (var decl in program.Declarations)
+            if (decl is ConstArrayDeclNode ca)
+                ctx.RegisterConstArraySize(ca.Name, ca.Size);
         foreach (var gv in globalVars)
             ctx.Symbols.AllocGlobal(gv.Name);
         foreach (var decl in program.Declarations)
@@ -154,7 +160,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         foreach (var param in gm.Parameters)
         {
             if (param.ParamName != "")
-                ctx.Symbols.AllocZeroPage(param.ParamName);
+                ctx.Symbols.AllocGlobal(param.ParamName);
         }
     }
 

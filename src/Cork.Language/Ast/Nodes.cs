@@ -130,6 +130,7 @@ public sealed record SceneVarDeclNode(
     string Name,
     ExprNode? Initializer,
     bool IsConst,
+    int ArraySize,      // 0 = not an array, >0 = array of this size
     SourceLocation Location
 ) : SceneMemberNode(Location);
 
@@ -211,6 +212,13 @@ public sealed record ForStmt(
     StmtNode Init,
     ExprNode Condition,
     StmtNode Step,
+    BlockNode Body,
+    SourceLocation Location
+) : StmtNode(Location);
+
+public sealed record ForEachStmt(
+    string VarName,
+    ExprNode Collection,
     BlockNode Body,
     SourceLocation Location
 ) : StmtNode(Location);
@@ -299,6 +307,12 @@ public sealed record IndexExpr(
 public sealed record MessageSendExpr(
     ExprNode Receiver,
     List<SelectorSegment> Segments,
+    SourceLocation Location
+) : ExprNode(Location);
+
+public sealed record StructInitExpr(
+    string TypeName,
+    List<(string FieldName, ExprNode Value)> FieldInits,
     SourceLocation Location
 ) : ExprNode(Location);
 

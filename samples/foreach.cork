@@ -1,0 +1,53 @@
+// Feature: for-each over const arrays AND struct arrays
+
+struct Enemy {
+    byte x = 0;
+    byte active = 0;
+
+    draw: {
+        if (active == 1) {
+            poke: 0x0400 + x value: 81;
+        }
+    }
+}
+
+entry scene Demo {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+    }
+
+    Enemy[5] enemies;
+
+    enter {
+        // Initialize with different positions
+        enemies[0].x = 5;  enemies[0].active = 1;
+        enemies[1].x = 15; enemies[1].active = 1;
+        enemies[2].x = 25; enemies[2].active = 1;
+        enemies[3].x = 35; enemies[3].active = 0;
+        enemies[4].x = 10; enemies[4].active = 1;
+    }
+
+    frame {
+        // Clear old positions
+        for (byte i = 0; i < 40; i += 1) {
+            poke: 0x0400 + i value: 32;
+        }
+
+        // Draw all active enemies using for-each
+        for (e in enemies) {
+            if (e.active == 1) {
+                poke: 0x0400 + e.x value: 81;
+            }
+        }
+
+        // Also iterate const array
+        byte col = 0;
+        for (ch in title) {
+            poke: 0x05EF + col value: ch;
+            col += 1;
+        }
+    }
+}
+
+const byte[7] title = { 5, 14, 5, 13, 25, 32, 33 };

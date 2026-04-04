@@ -46,5 +46,18 @@ public sealed class EmitContext
         DataAddresses = dataAddresses;
     }
 
+    // For-each over const byte array: (varName, dataAddr, indexZp)
+    public (string Name, ushort DataAddr, byte IndexZp)? ForEachVar { get; set; }
+    // For-each over struct array: (varName, structType, fieldBases, indexZp, arraySize)
+    public (string Name, string StructType, Dictionary<string, byte> FieldBases, byte IndexZp)? ForEachStructVar { get; set; }
+
+    // Const array sizes (populated during code generation)
+    private readonly Dictionary<string, int> _constArraySizes = [];
+
+    public void RegisterConstArraySize(string name, int size) => _constArraySizes[name] = size;
+    public int GetConstArraySize(string name) =>
+        _constArraySizes.TryGetValue(name, out var s) ? s
+            : throw new InvalidOperationException($"Unknown const array: {name}");
+
     public string NextLabel(string prefix) => $"{prefix}_{_labelCounter++}";
 }

@@ -50,6 +50,92 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
         ctx.LoopStack.Pop();
     }
 
+    public void EmitForEach(ForEachStmt forEach)
+    {
+        // For const arrays: desugar to indexed loop
+        // for (ch in message) → for (byte _idx = 0; _idx < message.length; _idx += 1) { ch = message[_idx]; ... }
+        if (forEach.Collection is IdentifierExpr arrIdent &&
+            ctx.DataAddresses.TryGetValue(arrIdent.Name, out var dataAddr))
+        {
+            // Look up array size from const arrays
+            var arraySize = ctx.GetConstArraySize(arrIdent.Name);
+            var idxZp = ctx.Symbols.AllocZeroPage($"_foreach_idx");
+            var loopLabel = ctx.NextLabel("feloop");
+            var stepLabel = ctx.NextLabel("festep");
+            var endLabel = ctx.NextLabel("feend");
+
+            // Init: idx = 0
+            ctx.Buffer.EmitLdaImmediate(0);
+            ctx.Buffer.EmitStaZeroPage(idxZp);
+
+            ctx.LoopStack.Push((endLabel, stepLabel));
+
+            // Condition: idx < arraySize
+            ctx.Buffer.DefineLabel(loopLabel);
+            ctx.Buffer.EmitLdaZeroPage(idxZp);
+            ctx.Buffer.EmitCmpImmediate((byte)arraySize);
+            ctx.Buffer.EmitBcc(3); // less → skip JMP, enter body
+            ctx.Buffer.EmitJmpForward(endLabel);
+
+            // Register loop variable as an alias for array[idx]
+            // The variable name resolves in EmitExprToA via a special "foreach context"
+            ctx.ForEachVar = (forEach.VarName, dataAddr, idxZp);
+
+            ctx.Statements.EmitBlock(forEach.Body);
+
+            ctx.ForEachVar = null;
+
+            // Step: idx += 1
+            ctx.Buffer.DefineLabel(stepLabel);
+            ctx.Buffer.EmitIncZeroPage(idxZp);
+
+            ctx.Buffer.EmitJmpAbsolute(ctx.Buffer.GetLabel(loopLabel));
+            ctx.Buffer.DefineLabel(endLabel);
+
+            ctx.LoopStack.Pop();
+            return;
+        }
+
+        // Struct array: for (e in enemies)
+        if (forEach.Collection is IdentifierExpr structArrIdent &&
+            ctx.Symbols.TryGetStructArray(structArrIdent.Name, out var arrInfo))
+        {
+            var idxZp = ctx.Symbols.AllocZeroPage($"_foreach_idx");
+            var loopLabel = ctx.NextLabel("feloop");
+            var stepLabel = ctx.NextLabel("festep");
+            var endLabel = ctx.NextLabel("feend");
+
+            ctx.Buffer.EmitLdaImmediate(0);
+            ctx.Buffer.EmitStaZeroPage(idxZp);
+
+            ctx.LoopStack.Push((endLabel, stepLabel));
+
+            ctx.Buffer.DefineLabel(loopLabel);
+            ctx.Buffer.EmitLdaZeroPage(idxZp);
+            ctx.Buffer.EmitCmpImmediate((byte)arrInfo.Size);
+            ctx.Buffer.EmitBcc(3);
+            ctx.Buffer.EmitJmpForward(endLabel);
+
+            // Register for-each struct context
+            ctx.ForEachStructVar = (forEach.VarName, arrInfo.StructType, arrInfo.FieldBases, idxZp);
+
+            ctx.Statements.EmitBlock(forEach.Body);
+
+            ctx.ForEachStructVar = null;
+
+            ctx.Buffer.DefineLabel(stepLabel);
+            ctx.Buffer.EmitIncZeroPage(idxZp);
+
+            ctx.Buffer.EmitJmpAbsolute(ctx.Buffer.GetLabel(loopLabel));
+            ctx.Buffer.DefineLabel(endLabel);
+
+            ctx.LoopStack.Pop();
+            return;
+        }
+
+        throw new InvalidOperationException("for-each: unsupported collection type");
+    }
+
     public void EmitSwitch(SwitchStmt stmt)
     {
         var isExpressionSwitch = stmt.Cases.Any(c =>

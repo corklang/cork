@@ -109,12 +109,35 @@ public sealed class SceneEmitter(EmitContext ctx)
 
         if (ctx.Symbols.TryGetStructType(decl.TypeName, out var structType))
         {
-            var fieldMap = new Dictionary<string, byte>();
+            if (decl.ArraySize > 0)
+            {
+                // Struct array: allocate N bytes per field (struct-of-arrays)
+                var fieldMap = new Dictionary<string, byte>();
+                foreach (var field in structType.Fields)
+                {
+                    var fieldZpName = $"{decl.Name}${field.Name}";
+                    var baseZp = ctx.Symbols.AllocArrayZeroPage(fieldZpName, decl.ArraySize);
+                    fieldMap[field.Name] = baseZp;
+
+                    // Initialize all elements with default
+                    var defVal = field.DefaultValue is IntLiteralExpr il ? (byte)il.Value : (byte)0;
+                    for (var i = 0; i < decl.ArraySize; i++)
+                    {
+                        ctx.Buffer.EmitLdaImmediate(defVal);
+                        ctx.Buffer.EmitStaZeroPage((byte)(baseZp + i));
+                    }
+                }
+                ctx.Symbols.RegisterStructArray(decl.Name, decl.TypeName, fieldMap, decl.ArraySize);
+                return;
+            }
+
+            // Single struct instance
+            var singleFieldMap = new Dictionary<string, byte>();
             foreach (var field in structType.Fields)
             {
                 var fieldZpName = $"{decl.Name}${field.Name}";
                 var zp = ctx.Symbols.AllocZeroPage(fieldZpName);
-                fieldMap[field.Name] = zp;
+                singleFieldMap[field.Name] = zp;
 
                 if (field.DefaultValue is IntLiteralExpr intLit)
                     ctx.Buffer.EmitLdaImmediate((byte)intLit.Value);
@@ -122,8 +145,35 @@ public sealed class SceneEmitter(EmitContext ctx)
                     ctx.Buffer.EmitLdaImmediate(0);
                 ctx.Buffer.EmitStaZeroPage(zp);
             }
-            ctx.Symbols.RegisterStructInstance(decl.Name, decl.TypeName, fieldMap);
+            ctx.Symbols.RegisterStructInstance(decl.Name, decl.TypeName, singleFieldMap);
             return;
+        }
+
+        // var with struct initializer: var name = TypeName { field = value, ... }
+        if (decl.Initializer is StructInitExpr structInit)
+        {
+            if (ctx.Symbols.TryGetStructType(structInit.TypeName, out var initStructType))
+            {
+                var fieldMap = new Dictionary<string, byte>();
+                foreach (var field in initStructType.Fields)
+                {
+                    var fieldZpName = $"{decl.Name}${field.Name}";
+                    var zp = ctx.Symbols.AllocZeroPage(fieldZpName);
+                    fieldMap[field.Name] = zp;
+
+                    // Check if this field has an override in the initializer
+                    var overrideInit = structInit.FieldInits.Find(f => f.FieldName == field.Name);
+                    if (overrideInit != default)
+                        ctx.Expressions.EmitExprToA(overrideInit.Value);
+                    else if (field.DefaultValue is IntLiteralExpr defLit)
+                        ctx.Buffer.EmitLdaImmediate((byte)defLit.Value);
+                    else
+                        ctx.Buffer.EmitLdaImmediate(0);
+                    ctx.Buffer.EmitStaZeroPage(zp);
+                }
+                ctx.Symbols.RegisterStructInstance(decl.Name, structInit.TypeName, fieldMap);
+                return;
+            }
         }
 
         ctx.Statements.EmitTypedVarInit(decl.TypeName, decl.Name, decl.Initializer);
