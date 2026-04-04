@@ -8,6 +8,10 @@ clearScreen: {
         poke: (0x04FA + i) value: 32;
         poke: (0x05F4 + i) value: 32;
         poke: (0x06EE + i) value: 32;
+        poke: (0xD800 + i) value: 14;
+        poke: (0xD8FA + i) value: 14;
+        poke: (0xD9F4 + i) value: 14;
+        poke: (0xDAEE + i) value: 14;
         i += 1;
     }
 }
@@ -37,10 +41,10 @@ entry scene TextMode {
         printAt: 365 text: "40X25 CHARACTERS";
         printAt: 405 text: "1 COLOR PER CHARACTER";
         printAt: 808 text: "FIRE TO CONTINUE";
-        // White color for title
+        // White color for title at position 250 -> color RAM $D8FA
         i = 0;
         while (i < 13) {
-            poke: (0xD8F0 + i) value: Color.white;
+            poke: (0xD8FA + i) value: Color.white;
             i += 1;
         }
     }
