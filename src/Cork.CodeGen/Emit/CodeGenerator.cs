@@ -9,7 +9,7 @@ using Cork.Language.Ast;
 /// </summary>
 public sealed class CodeGenerator(ushort codeBase = 0x0810)
 {
-    public (byte[] Code, ushort EntryPoint) Generate(ProgramNode program)
+    public (byte[] Code, ushort EntryPoint, int PeepholeRemovals) Generate(ProgramNode program)
     {
         // Dead code elimination: determine which globals are reachable from scenes
         var reachable = ReachabilityAnalysis.Analyze(program);
@@ -97,7 +97,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         dataBytes.CopyTo(result.AsSpan()[code.Length..]);
         inlineData.CopyTo(result, code.Length + constDataSize);
         spriteData.CopyTo(result, code.Length + constDataSize + inlineData.Length);
-        return (result, codeBase);
+        return (result, codeBase, ctx.Buffer.PeepholeRemovals);
     }
 
     private static EmitContext CreateContext(ushort codeBase, Dictionary<string, ushort> dataAddresses)

@@ -12,11 +12,21 @@ public sealed class AssemblyBuffer(ushort baseAddress)
 
     private enum FixupKind { Word, LoByte, HiByte }
 
+    // Peephole state: track last instruction for redundancy elimination
+    private byte _prevOp;
+    private byte _prevArg;
+    private bool _hasPrev;
+    public int PeepholeRemovals { get; private set; }
+
     public ushort BaseAddress => baseAddress;
     public ushort CurrentAddress => (ushort)(baseAddress + _bytes.Count);
     public int Length => _bytes.Count;
 
-    public void DefineLabel(string name) => _labels[name] = CurrentAddress;
+    public void DefineLabel(string name)
+    {
+        _labels[name] = CurrentAddress;
+        _hasPrev = false; // branch target — can't optimize across labels
+    }
 
     public void EmitByte(byte value) => _bytes.Add(value);
 
@@ -31,12 +41,50 @@ public sealed class AssemblyBuffer(ushort baseAddress)
         foreach (var b in data) _bytes.Add(b);
     }
 
+    // --- Peephole optimization ---
+
+    private void TrackInstruction(byte op, byte arg)
+    {
+        _prevOp = op;
+        _prevArg = arg;
+        _hasPrev = true;
+    }
+
+    private void ResetPeephole() => _hasPrev = false;
+
     // --- 6510 Instructions ---
 
     // LDA
-    public void EmitLdaImmediate(byte value) { EmitByte(0xA9); EmitByte(value); }
-    public void EmitLdaZeroPage(byte addr) { EmitByte(0xA5); EmitByte(addr); }
-    public void EmitLdaAbsolute(ushort addr) { EmitByte(0xAD); EmitWord(addr); }
+    public void EmitLdaImmediate(byte value)
+    {
+        // STA zp; LDA #same → keep (STA needed for side effects, A value differs)
+        // LDA #X; LDA #Y → remove first LDA
+        if (_hasPrev && _prevOp == 0xA9)
+        {
+            // Previous was also LDA #imm — remove it (2 bytes)
+            _bytes.RemoveRange(_bytes.Count - 2, 2);
+            PeepholeRemovals += 2;
+        }
+        EmitByte(0xA9); EmitByte(value);
+        TrackInstruction(0xA9, value);
+    }
+
+    public void EmitLdaZeroPage(byte addr)
+    {
+        // STA zp; LDA zp (same addr) → remove LDA, A already has the value
+        if (_hasPrev && _prevOp == 0x85 && _prevArg == addr)
+        {
+            PeepholeRemovals += 2;
+            // Don't emit — A still holds the stored value
+            // Track as if we loaded (A has addr's value)
+            TrackInstruction(0xA5, addr);
+            return;
+        }
+        EmitByte(0xA5); EmitByte(addr);
+        TrackInstruction(0xA5, addr);
+    }
+
+    public void EmitLdaAbsolute(ushort addr) { EmitByte(0xAD); EmitWord(addr); ResetPeephole(); }
     public void EmitLdaAbsoluteX(ushort addr) { EmitByte(0xBD); EmitWord(addr); }
     public void EmitLdaAbsoluteY(ushort addr) { EmitByte(0xB9); EmitWord(addr); }
 
@@ -54,22 +102,26 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     public void EmitLdyImmediate(byte value) { EmitByte(0xA0); EmitByte(value); }
 
     // STA
-    public void EmitStaZeroPage(byte addr) { EmitByte(0x85); EmitByte(addr); }
-    public void EmitStaAbsolute(ushort addr) { EmitByte(0x8D); EmitWord(addr); }
-    public void EmitStaAbsoluteX(ushort addr) { EmitByte(0x9D); EmitWord(addr); }
-    public void EmitStaIndirectY(byte zpAddr) { EmitByte(0x91); EmitByte(zpAddr); }
+    public void EmitStaZeroPage(byte addr)
+    {
+        EmitByte(0x85); EmitByte(addr);
+        TrackInstruction(0x85, addr);
+    }
+    public void EmitStaAbsolute(ushort addr) { EmitByte(0x8D); EmitWord(addr); ResetPeephole(); }
+    public void EmitStaAbsoluteX(ushort addr) { EmitByte(0x9D); EmitWord(addr); ResetPeephole(); }
+    public void EmitStaIndirectY(byte zpAddr) { EmitByte(0x91); EmitByte(zpAddr); ResetPeephole(); }
 
     // STX
     public void EmitStxZeroPage(byte addr) { EmitByte(0x86); EmitByte(addr); }
 
-    // Arithmetic
-    public void EmitClc() => EmitByte(0x18);
-    public void EmitSec() => EmitByte(0x38);
-    public void EmitAdcImmediate(byte value) { EmitByte(0x69); EmitByte(value); }
-    public void EmitAdcZeroPage(byte addr) { EmitByte(0x65); EmitByte(addr); }
-    public void EmitAdcAbsolute(ushort addr) { EmitByte(0x6D); EmitWord(addr); }
-    public void EmitSbcImmediate(byte value) { EmitByte(0xE9); EmitByte(value); }
-    public void EmitSbcZeroPage(byte addr) { EmitByte(0xE5); EmitByte(addr); }
+    // Arithmetic — all change A, reset peephole
+    public void EmitClc() { EmitByte(0x18); /* don't reset — flag only */ }
+    public void EmitSec() { EmitByte(0x38); /* don't reset — flag only */ }
+    public void EmitAdcImmediate(byte value) { EmitByte(0x69); EmitByte(value); ResetPeephole(); }
+    public void EmitAdcZeroPage(byte addr) { EmitByte(0x65); EmitByte(addr); ResetPeephole(); }
+    public void EmitAdcAbsolute(ushort addr) { EmitByte(0x6D); EmitWord(addr); ResetPeephole(); }
+    public void EmitSbcImmediate(byte value) { EmitByte(0xE9); EmitByte(value); ResetPeephole(); }
+    public void EmitSbcZeroPage(byte addr) { EmitByte(0xE5); EmitByte(addr); ResetPeephole(); }
 
     // Increment / Decrement
     public void EmitInx() => EmitByte(0xE8);
@@ -90,28 +142,28 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     public void EmitCmpZeroPage(byte addr) { EmitByte(0xC5); EmitByte(addr); }
     public void EmitCpxImmediate(byte value) { EmitByte(0xE0); EmitByte(value); }
 
-    // Branch
-    public void EmitBne(sbyte offset) { EmitByte(0xD0); EmitByte((byte)offset); }
-    public void EmitBeq(sbyte offset) { EmitByte(0xF0); EmitByte((byte)offset); }
-    public void EmitBcc(sbyte offset) { EmitByte(0x90); EmitByte((byte)offset); }
-    public void EmitBcs(sbyte offset) { EmitByte(0xB0); EmitByte((byte)offset); }
-    public void EmitBmi(sbyte offset) { EmitByte(0x30); EmitByte((byte)offset); }
-    public void EmitBpl(sbyte offset) { EmitByte(0x10); EmitByte((byte)offset); }
+    // Branch — all reset peephole (control flow change)
+    public void EmitBne(sbyte offset) { EmitByte(0xD0); EmitByte((byte)offset); ResetPeephole(); }
+    public void EmitBeq(sbyte offset) { EmitByte(0xF0); EmitByte((byte)offset); ResetPeephole(); }
+    public void EmitBcc(sbyte offset) { EmitByte(0x90); EmitByte((byte)offset); ResetPeephole(); }
+    public void EmitBcs(sbyte offset) { EmitByte(0xB0); EmitByte((byte)offset); ResetPeephole(); }
+    public void EmitBmi(sbyte offset) { EmitByte(0x30); EmitByte((byte)offset); ResetPeephole(); }
+    public void EmitBpl(sbyte offset) { EmitByte(0x10); EmitByte((byte)offset); ResetPeephole(); }
 
     // Jump
-    public void EmitJmpAbsolute(ushort addr) { EmitByte(0x4C); EmitWord(addr); }
-    public void EmitJsrAbsolute(ushort addr) { EmitByte(0x20); EmitWord(addr); }
-    public void EmitRts() => EmitByte(0x60);
+    public void EmitJmpAbsolute(ushort addr) { EmitByte(0x4C); EmitWord(addr); ResetPeephole(); }
+    public void EmitJsrAbsolute(ushort addr) { EmitByte(0x20); EmitWord(addr); ResetPeephole(); }
+    public void EmitRts() { EmitByte(0x60); ResetPeephole(); }
 
-    // Transfer
-    public void EmitTax() => EmitByte(0xAA);
-    public void EmitTay() => EmitByte(0xA8);
-    public void EmitTxa() => EmitByte(0x8A);
-    public void EmitTya() => EmitByte(0x98);
+    // Transfer — changes A/X/Y relationship, reset
+    public void EmitTax() { EmitByte(0xAA); ResetPeephole(); }
+    public void EmitTay() { EmitByte(0xA8); ResetPeephole(); }
+    public void EmitTxa() { EmitByte(0x8A); ResetPeephole(); }
+    public void EmitTya() { EmitByte(0x98); ResetPeephole(); }
 
-    // Stack
-    public void EmitPha() => EmitByte(0x48);
-    public void EmitPla() => EmitByte(0x68);
+    // Stack — changes A, reset
+    public void EmitPha() { EmitByte(0x48); ResetPeephole(); }
+    public void EmitPla() { EmitByte(0x68); ResetPeephole(); }
 
     // Misc
     public void EmitNop() => EmitByte(0xEA);
@@ -128,6 +180,7 @@ public sealed class AssemblyBuffer(ushort baseAddress)
         EmitByte(0x4C);
         _fixups.Add((_bytes.Count, label, FixupKind.Word));
         EmitWord(0x0000);
+        ResetPeephole();
     }
 
     public void EmitJsrForward(string label)
@@ -135,6 +188,7 @@ public sealed class AssemblyBuffer(ushort baseAddress)
         EmitByte(0x20);
         _fixups.Add((_bytes.Count, label, FixupKind.Word));
         EmitWord(0x0000);
+        ResetPeephole();
     }
 
     /// <summary>

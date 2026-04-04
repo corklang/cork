@@ -40,7 +40,7 @@ try
     // Generate 6510 code
     var codeStart = PrgWriter.CalculateCodeStart();
     var codeGen = new CodeGenerator(codeStart);
-    var (machineCode, _) = codeGen.Generate(program);
+    var (machineCode, _, peepholeRemovals) = codeGen.Generate(program);
 
     // Write PRG
     PrgWriter.WriteToFile(outputPath, machineCode);
@@ -53,6 +53,8 @@ try
     Console.WriteLine($"  Code:   ${codeStart:X4}-${codeEnd:X4} ({machineCode.Length} bytes)");
     Console.WriteLine($"  Output: {outputPath} ({fileSize} bytes)");
     Console.WriteLine($"  RAM:    {machineCode.Length}/{availableRam} bytes used ({usedPercent}%)");
+    if (peepholeRemovals > 0)
+        Console.WriteLine($"  Peephole: {peepholeRemovals} bytes removed");
 
     return 0;
 }

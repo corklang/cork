@@ -24,7 +24,7 @@ public sealed class StatementEmitter(EmitContext ctx)
             case ReturnStmt ret: EmitReturn(ret); break;
             case BreakStmt: ctx.ControlFlow.EmitBreak(); break;
             case ContinueStmt: ctx.ControlFlow.EmitContinue(); break;
-            default: throw new InvalidOperationException($"Unsupported statement: {stmt.GetType().Name}");
+            default: throw new CompileError($"Unsupported statement: {stmt.GetType().Name}", stmt.Location);
         }
     }
 
@@ -161,7 +161,7 @@ public sealed class StatementEmitter(EmitContext ctx)
         }
         else
         {
-            throw new InvalidOperationException("Unsupported assignment target");
+            throw new CompileError("Unsupported assignment target", assign.Target.Location);
         }
 
         if (varName != "" && ctx.Symbols.IsWordVar(varName))
@@ -243,7 +243,7 @@ public sealed class StatementEmitter(EmitContext ctx)
                 ctx.Buffer.EmitStaZeroPage(zp); // remainder
                 break;
             default:
-                throw new InvalidOperationException($"Phase 1: unsupported assignment op {assign.Op}");
+                throw new CompileError($"Unsupported assignment operator: {assign.Op}", assign.Target.Location);
         }
 
         // Sprite auto-sync: if this ZP has a paired VIC-II register, update it

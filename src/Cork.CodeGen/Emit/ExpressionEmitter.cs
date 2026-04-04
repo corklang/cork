@@ -121,7 +121,7 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 break;
 
             default:
-                throw new InvalidOperationException($"Phase 1: unsupported expression: {expr.GetType().Name}");
+                throw new CompileError($"Unsupported expression: {expr.GetType().Name}", expr.Location);
         }
     }
 
@@ -214,7 +214,7 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                     throw new InvalidOperationException("Shift count must be constant");
                 break;
             default:
-                throw new InvalidOperationException($"Unsupported binary operator in expression: {bin.Op}");
+                throw new CompileError($"Unsupported binary operator: {bin.Op}", bin.Location);
         }
     }
 

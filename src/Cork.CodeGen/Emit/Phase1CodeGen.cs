@@ -10,6 +10,6 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 {
     private readonly CodeGenerator _generator = new(codeBase);
 
-    public (byte[] Code, ushort EntryPoint) Generate(ProgramNode program) =>
+    public (byte[] Code, ushort EntryPoint, int PeepholeRemovals) Generate(ProgramNode program) =>
         _generator.Generate(program);
 }

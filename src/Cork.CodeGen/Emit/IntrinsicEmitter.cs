@@ -145,7 +145,7 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             }
         }
 
-        throw new InvalidOperationException("Unsupported message send");
+        throw new CompileError("Unsupported message send", msgSend.Location);
     }
 
     public void EmitPoke(ExprNode addressExpr, ExprNode valueExpr)
@@ -210,7 +210,7 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
         }
         else
         {
-            throw new InvalidOperationException("poke address must be constant, constant + expr, or word variable");
+            throw new CompileError("poke address must be constant, constant + expr, or word variable", addressExpr.Location);
         }
     }
 
