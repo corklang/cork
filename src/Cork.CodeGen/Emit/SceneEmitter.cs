@@ -11,6 +11,7 @@ public sealed class SceneEmitter(EmitContext ctx)
     public void EmitScene(SceneNode scene)
     {
         ctx.Symbols.ResetForScene();
+        ctx.DirtySpriteRegs.Clear();
 
         ctx.Buffer.DefineLabel($"_scene_{scene.Name}");
 
@@ -276,10 +277,11 @@ public sealed class SceneEmitter(EmitContext ctx)
             }
         }
 
-        // Enable sprite
+        // Enable sprite (track for cleanup on scene exit)
         ctx.Buffer.EmitLdaAbsolute(0xD015);
         ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit); // ORA #bit
         ctx.Buffer.EmitStaAbsolute(0xD015);
+        ctx.DirtySpriteRegs.Add(0xD015);
 
         // Multicolor
         if (multicolor)
@@ -287,6 +289,7 @@ public sealed class SceneEmitter(EmitContext ctx)
             ctx.Buffer.EmitLdaAbsolute(0xD01C);
             ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit);
             ctx.Buffer.EmitStaAbsolute(0xD01C);
+            ctx.DirtySpriteRegs.Add(0xD01C);
         }
 
         // Expand X
@@ -295,6 +298,7 @@ public sealed class SceneEmitter(EmitContext ctx)
             ctx.Buffer.EmitLdaAbsolute(0xD01D);
             ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit);
             ctx.Buffer.EmitStaAbsolute(0xD01D);
+            ctx.DirtySpriteRegs.Add(0xD01D);
         }
 
         // Expand Y
@@ -303,6 +307,7 @@ public sealed class SceneEmitter(EmitContext ctx)
             ctx.Buffer.EmitLdaAbsolute(0xD017);
             ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit);
             ctx.Buffer.EmitStaAbsolute(0xD017);
+            ctx.DirtySpriteRegs.Add(0xD017);
         }
 
         // Priority (behind background)
@@ -311,6 +316,7 @@ public sealed class SceneEmitter(EmitContext ctx)
             ctx.Buffer.EmitLdaAbsolute(0xD01B);
             ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit);
             ctx.Buffer.EmitStaAbsolute(0xD01B);
+            ctx.DirtySpriteRegs.Add(0xD01B);
         }
     }
 

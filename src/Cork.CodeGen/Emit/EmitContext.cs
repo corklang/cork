@@ -108,5 +108,8 @@ public sealed class EmitContext
         _inlineDataAddresses.Clear();
     }
 
+    // Sprite VIC-II registers dirtied by the current scene (cleared on go)
+    public HashSet<ushort> DirtySpriteRegs { get; } = [];
+
     public string NextLabel(string prefix) => $"{prefix}_{_labelCounter++}";
 }

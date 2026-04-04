@@ -20,7 +20,7 @@ public sealed class StatementEmitter(EmitContext ctx)
             case ForEachStmt forEach: ctx.ControlFlow.EmitForEach(forEach); break;
             case SwitchStmt switchStmt: ctx.ControlFlow.EmitSwitch(switchStmt); break;
             case MessageSendStmt msgSend: ctx.Intrinsics.EmitMessageSend(msgSend); break;
-            case GoStmt goStmt: ctx.Buffer.EmitJmpForward($"_scene_{goStmt.SceneName}"); break;
+            case GoStmt goStmt: EmitGo(goStmt); break;
             case ReturnStmt ret: EmitReturn(ret); break;
             case BreakStmt: ctx.ControlFlow.EmitBreak(); break;
             case ContinueStmt: ctx.ControlFlow.EmitContinue(); break;
@@ -37,6 +37,18 @@ public sealed class StatementEmitter(EmitContext ctx)
             if (stmt is ReturnStmt or BreakStmt or ContinueStmt or GoStmt)
                 break;
         }
+    }
+
+    private void EmitGo(GoStmt goStmt)
+    {
+        // Clear sprite VIC-II registers dirtied by this scene before leaving
+        if (ctx.DirtySpriteRegs.Count > 0)
+        {
+            ctx.Buffer.EmitLdaImmediate(0);
+            foreach (var reg in ctx.DirtySpriteRegs)
+                ctx.Buffer.EmitStaAbsolute(reg);
+        }
+        ctx.Buffer.EmitJmpForward($"_scene_{goStmt.SceneName}");
     }
 
     private void EmitReturn(ReturnStmt ret)
