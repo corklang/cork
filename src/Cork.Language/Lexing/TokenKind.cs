@@ -8,6 +8,7 @@ public enum TokenKind
     StringLiteral,
     TrueLiteral,
     FalseLiteral,
+    SpritePatternLiteral,
 
     // Identifiers
     Identifier,

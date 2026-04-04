@@ -109,6 +109,9 @@ public sealed class Lexer(string source, string filePath = "<stdin>")
         // String literals
         if (c == '"') return ReadStringLiteral();
 
+        // Sprite pattern literals
+        if (c == '`') return ReadSpritePatternLiteral();
+
         // Numbers
         if (char.IsAsciiDigit(c)) return ReadNumberLiteral();
 
@@ -319,6 +322,25 @@ public sealed class Lexer(string source, string filePath = "<stdin>")
         if (startCol < 1) startCol = 1;
         var loc = new SourceLocation(filePath, startLine, startCol, startOffset, text.Length);
         return new Token(kind, text, loc, literal);
+    }
+
+    private Token ReadSpritePatternLiteral()
+    {
+        var start = _pos;
+        Advance(); // skip opening `
+        var sb = new System.Text.StringBuilder();
+
+        while (_pos < source.Length && Current != '`')
+        {
+            sb.Append(Current);
+            Advance();
+        }
+
+        if (_pos >= source.Length) throw Error("Unterminated sprite pattern literal");
+        Advance(); // skip closing `
+
+        var text = source[start.._pos];
+        return MakeToken(TokenKind.SpritePatternLiteral, text, start, sb.ToString());
     }
 
     private static bool IsIdentStart(char c) => char.IsAsciiLetter(c) || c == '_';

@@ -333,3 +333,8 @@ public sealed record ArrayInitExpr(
     List<ExprNode> Elements,
     SourceLocation Location
 ) : ExprNode(Location);
+
+public sealed record SpritePatternExpr(
+    string Pattern,
+    SourceLocation Location
+) : ExprNode(Location);

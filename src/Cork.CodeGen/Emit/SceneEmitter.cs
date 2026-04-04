@@ -8,10 +8,13 @@ using Cork.Language.Ast;
 /// </summary>
 public sealed class SceneEmitter(EmitContext ctx)
 {
+    private string _currentSceneName = "";
+
     public void EmitScene(SceneNode scene)
     {
         ctx.Symbols.ResetForScene();
         ctx.DirtySpriteRegs.Clear();
+        _currentSceneName = scene.Name;
 
         ctx.Buffer.DefineLabel($"_scene_{scene.Name}");
 
@@ -238,7 +241,10 @@ public sealed class SceneEmitter(EmitContext ctx)
                     if (setting.Value is IdentifierExpr { Name: "back" }) priorityBack = true;
                     break;
                 case "data":
-                    if (setting.Value is IdentifierExpr dataIdent) dataRef = dataIdent.Name;
+                    if (setting.Value is IdentifierExpr dataIdent)
+                        dataRef = dataIdent.Name;
+                    else if (setting.Value is SpritePatternExpr)
+                        dataRef = $"_sprite_{_currentSceneName}_{sprite.Name}Data";
                     break;
             }
         }

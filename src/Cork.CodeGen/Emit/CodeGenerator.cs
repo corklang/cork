@@ -11,6 +11,9 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 {
     public (byte[] Code, ushort EntryPoint) Generate(ProgramNode program)
     {
+        // Synthesize const arrays + pointer globals from inline sprite patterns
+        program = SynthesizeInlineSpriteData(program);
+
         // Collect const data
         var dataBytes = new List<byte>();
         var dataNames = new Dictionary<string, int>();
@@ -222,6 +225,48 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         ctx.Buffer.DefineLabel(label);
         ctx.Statements.EmitBlock(gm.Body);
         ctx.Buffer.EmitRts();
+    }
+
+    /// <summary>
+    /// Synthesize ConstArrayDeclNode + GlobalVarDeclNode for each inline sprite pattern,
+    /// so the existing data collection and sprite copy pipeline handles them.
+    /// </summary>
+    private static ProgramNode SynthesizeInlineSpriteData(ProgramNode program)
+    {
+        var syntheticDecls = new List<TopLevelNode>();
+        var nextPtr = 13;
+
+        foreach (var scene in program.Declarations.OfType<SceneNode>())
+        {
+            foreach (var sprite in scene.Members.OfType<SpriteBlockNode>())
+            {
+                var dataSetting = sprite.Settings
+                    .FirstOrDefault(s => s.Name == "data" && s.Value is SpritePatternExpr);
+                if (dataSetting == null) continue;
+
+                var pattern = (SpritePatternExpr)dataSetting.Value;
+                var isMulticolor = sprite.Settings
+                    .Any(s => s.Name == "multicolor" && s.Value is BoolLiteralExpr { Value: true });
+
+                var bytes = SpritePatternCompiler.Compile(pattern.Pattern, isMulticolor);
+                var dataName = $"_sprite_{scene.Name}_{sprite.Name}Data";
+                var ptrName = $"_sprite_{scene.Name}_{sprite.Name}Ptr";
+                var loc = pattern.Location;
+
+                syntheticDecls.Add(new ConstArrayDeclNode(
+                    "byte", 63, dataName,
+                    bytes.Select(b => (ExprNode)new IntLiteralExpr(b, loc)).ToList(),
+                    loc));
+
+                syntheticDecls.Add(new GlobalVarDeclNode(
+                    "byte", ptrName,
+                    new IntLiteralExpr(nextPtr++, loc),
+                    loc));
+            }
+        }
+
+        if (syntheticDecls.Count == 0) return program;
+        return program with { Declarations = [..syntheticDecls, ..program.Declarations] };
     }
 
     /// <summary>

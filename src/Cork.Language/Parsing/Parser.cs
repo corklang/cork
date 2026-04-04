@@ -1003,6 +1003,14 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
             return new BoolLiteralExpr(false, loc);
         }
 
+        if (Check(TokenKind.SpritePatternLiteral))
+        {
+            var token = Advance();
+            var raw = (string)token.LiteralValue!;
+            var stripped = new string(raw.Where(c => !char.IsWhiteSpace(c)).ToArray());
+            return new SpritePatternExpr(stripped, loc);
+        }
+
         if (Check(TokenKind.Identifier))
         {
             // Check for struct initializer: TypeName { field = value, ... }
