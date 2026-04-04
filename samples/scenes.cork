@@ -1,0 +1,75 @@
+// Phase 3: Multiple scenes with transitions
+byte score = 0;
+
+entry scene Title {
+    hardware {
+        border: Color.lightBlue;
+        background: Color.blue;
+    }
+
+    enter {
+        // Write "PRESS FIRE" at row 12, col 15 ($05EF = $0400 + 495)
+        byte i = 0;
+        while (i < 10) {
+            poke: (0x05EF + i) value: titleText[i];
+            i += 1;
+        }
+    }
+
+    byte frameCount = 0;
+
+    frame {
+        frameCount += 1;
+        if (frameCount == 25) {
+            frameCount = 0;
+            score += 1;
+            poke: 0xD020 value: score;
+        }
+
+        if (joystick.port2.fire) {
+            go Game;
+        }
+    }
+}
+
+scene Game {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+    }
+
+    byte playerPos = 120;
+
+    enter {
+        clearScreen:;
+    }
+
+    frame {
+        poke: (0x0400 + playerPos) value: 32;
+
+        if (joystick.port2.left)  { playerPos -= 1; }
+        if (joystick.port2.right) { playerPos += 1; }
+        if (joystick.port2.up)    { playerPos -= 40; }
+        if (joystick.port2.down)  { playerPos += 40; }
+
+        poke: (0x0400 + playerPos) value: 81;
+
+        // Border color cycles through C64 colors — visual proof the global works
+        score += 1;
+        poke: 0xD020 value: score;
+    }
+
+    clearScreen: {
+        byte i = 0;
+        while (i < 250) {
+            poke: (0x0400 + i) value: 32;
+            poke: (0x04FA + i) value: 32;
+            poke: (0x05F4 + i) value: 32;
+            poke: (0x06EE + i) value: 32;
+            i += 1;
+        }
+    }
+}
+
+// "PRESS FIRE" in screen codes
+const byte[10] titleText = { 16, 18, 5, 19, 19, 32, 6, 9, 18, 5 };

@@ -12,13 +12,9 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 {
     public (byte[] Code, ushort EntryPoint) Generate(ProgramNode program)
     {
-        // Calculate data section: const arrays placed after code
-        // We need two passes: first to measure code size, then emit with known addresses.
-        // For Phase 1, just do it in one pass with forward JMP fixups.
-
         // Collect const data
         var dataBytes = new List<byte>();
-        var dataNames = new Dictionary<string, int>(); // name -> offset within data section
+        var dataNames = new Dictionary<string, int>();
         foreach (var decl in program.Declarations)
         {
             if (decl is ConstArrayDeclNode constArr)
@@ -34,22 +30,41 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
             }
         }
 
-        // First pass: emit code to measure size
-        var measuredSize = EmitPass(program, dataNames, codeBase, 0xFFFF, measure: true);
+        // Collect all scenes
+        var scenes = program.Declarations.OfType<SceneNode>().ToList();
+        var entryScene = scenes.FirstOrDefault(s => s.IsEntry)
+            ?? throw new InvalidOperationException("No entry scene found");
 
-        // Now we know where data goes
+        // Collect global variables
+        var globalVars = program.Declarations.OfType<GlobalVarDeclNode>().ToList();
+
+        // First pass: measure code size
+        var measuredSize = EmitAll(program, scenes, globalVars, dataNames, codeBase, 0xFFFF).Length;
+
+        // Second pass: emit with correct data addresses
         var dataStart = (ushort)(codeBase + measuredSize);
         var dataAddresses = new Dictionary<string, ushort>();
         foreach (var (name, offset) in dataNames)
             dataAddresses[name] = (ushort)(dataStart + offset);
 
-        // Second pass: emit code with correct data addresses
         var emitter = new Emitter(codeBase, dataAddresses);
-        foreach (var decl in program.Declarations)
-        {
-            if (decl is SceneNode { IsEntry: true } scene)
-                emitter.EmitScene(scene);
-        }
+
+        // Allocate globals first (persist across scenes)
+        foreach (var gv in globalVars)
+            emitter.AllocGlobal(gv.Name);
+
+        // Emit SEI + global init
+        emitter.Buffer.EmitSei();
+        foreach (var gv in globalVars)
+            emitter.EmitGlobalInit(gv);
+
+        // Jump to entry scene
+        emitter.Buffer.EmitJmpForward($"_scene_{entryScene.Name}");
+
+        // Emit all scenes
+        foreach (var scene in scenes)
+            emitter.EmitScene(scene);
+
         emitter.Buffer.ResolveFixups();
 
         // Combine code + data
@@ -60,19 +75,27 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         return (result, codeBase);
     }
 
-    private static int EmitPass(ProgramNode program, Dictionary<string, int> dataNames, ushort codeBase, ushort dataStart, bool measure)
+    private static byte[] EmitAll(ProgramNode program, List<SceneNode> scenes,
+        List<GlobalVarDeclNode> globalVars, Dictionary<string, int> dataNames,
+        ushort codeBase, ushort dataStart)
     {
         var dataAddresses = new Dictionary<string, ushort>();
         foreach (var (name, offset) in dataNames)
             dataAddresses[name] = (ushort)(dataStart + offset);
 
         var emitter = new Emitter(codeBase, dataAddresses);
-        foreach (var decl in program.Declarations)
-        {
-            if (decl is SceneNode { IsEntry: true } scene)
-                emitter.EmitScene(scene);
-        }
-        return emitter.Buffer.Length;
+        foreach (var gv in globalVars)
+            emitter.AllocGlobal(gv.Name);
+
+        emitter.Buffer.EmitSei();
+        foreach (var gv in globalVars)
+            emitter.EmitGlobalInit(gv);
+        emitter.Buffer.EmitJmpForward($"_scene_{scenes.First(s => s.IsEntry).Name}");
+
+        foreach (var scene in scenes)
+            emitter.EmitScene(scene);
+
+        return emitter.Buffer.ToArray();
     }
 
     internal sealed class Emitter(ushort codeBase, Dictionary<string, ushort> dataAddresses)
@@ -85,10 +108,44 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
         private string NextLabel(string prefix) => $"{prefix}_{_labelCounter++}";
 
         private readonly Dictionary<string, List<MethodParameter>> _methodParams = [];
+        private readonly Dictionary<string, byte> _globals = [];
+        private byte _globalZpEnd = 0x02; // globals occupy $02-$xx
+
+        public void AllocGlobal(string name)
+        {
+            if (!_globals.ContainsKey(name))
+            {
+                _globals[name] = _globalZpEnd++;
+            }
+        }
+
+        public void EmitGlobalInit(GlobalVarDeclNode gv)
+        {
+            var zp = _globals[gv.Name];
+            if (gv.Initializer is IntLiteralExpr intLit)
+            {
+                Buffer.EmitLdaImmediate((byte)intLit.Value);
+                Buffer.EmitStaZeroPage(zp);
+            }
+            else
+            {
+                Buffer.EmitLdaImmediate(0);
+                Buffer.EmitStaZeroPage(zp);
+            }
+        }
 
         public void EmitScene(SceneNode scene)
         {
-            // Pre-register method parameters so calls can store args to the right ZP slots
+            // Reset scene-local ZP allocation (after globals)
+            _locals.Clear();
+            foreach (var (name, zp) in _globals)
+                _locals[name] = zp; // globals are accessible in all scenes
+            _nextZp = _globalZpEnd;
+
+            // Define scene label for `go` transitions
+            Buffer.DefineLabel($"_scene_{scene.Name}");
+
+            // Pre-register method parameters
             foreach (var member in scene.Members)
             {
                 if (member is SceneMethodNode method)
@@ -101,9 +158,6 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                     }
                 }
             }
-
-            // Disable KERNAL interrupts — stops cursor blink and keyboard scan
-            Buffer.EmitSei();
 
             // Hardware setup
             foreach (var member in scene.Members)
@@ -205,6 +259,7 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
                 case WhileStmt whileStmt: EmitWhile(whileStmt); break;
                 case IfStmt ifStmt: EmitIf(ifStmt); break;
                 case MessageSendStmt msgSend: EmitMessageSend(msgSend); break;
+                case GoStmt goStmt: Buffer.EmitJmpForward($"_scene_{goStmt.SceneName}"); break;
                 default: throw new InvalidOperationException($"Unsupported statement: {stmt.GetType().Name}");
             }
         }
@@ -418,18 +473,24 @@ public sealed class Phase1CodeGen(ushort codeBase = 0x0810)
 
         private void EmitPoke(ExprNode addressExpr, ExprNode valueExpr)
         {
+            // poke: (constant + variable) value: expr  →  STA abs,X
             if (addressExpr is BinaryExpr { Op: TokenKind.Plus } addExpr &&
                 addExpr.Left is IntLiteralExpr baseAddr &&
                 addExpr.Right is IdentifierExpr indexVar)
             {
-                // LDX index; LDA value; STA base,X
                 Buffer.EmitLdxZeroPage(GetLocal(indexVar.Name));
                 EmitExprToA(valueExpr);
                 Buffer.EmitStaAbsoluteX((ushort)baseAddr.Value);
             }
+            // poke: constant value: expr  →  STA abs
+            else if (addressExpr is IntLiteralExpr constAddr)
+            {
+                EmitExprToA(valueExpr);
+                Buffer.EmitStaAbsolute((ushort)constAddr.Value);
+            }
             else
             {
-                throw new InvalidOperationException("Phase 1: poke address must be constant + variable");
+                throw new InvalidOperationException("poke address must be constant or constant + variable");
             }
         }
 

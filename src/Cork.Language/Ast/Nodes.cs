@@ -138,6 +138,11 @@ public sealed record ReturnStmt(
     SourceLocation Location
 ) : StmtNode(Location);
 
+public sealed record GoStmt(
+    string SceneName,
+    SourceLocation Location
+) : StmtNode(Location);
+
 public sealed record BreakStmt(SourceLocation Location) : StmtNode(Location);
 public sealed record ContinueStmt(SourceLocation Location) : StmtNode(Location);
 

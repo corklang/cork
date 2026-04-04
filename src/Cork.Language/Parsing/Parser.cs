@@ -255,6 +255,7 @@ public sealed class Parser(List<Token> tokens)
         if (Check(TokenKind.WhileKw)) return ParseWhile();
         if (Check(TokenKind.IfKw)) return ParseIf();
         if (Check(TokenKind.ReturnKw)) return ParseReturn();
+        if (Check(TokenKind.GoKw)) return ParseGo();
         if (Check(TokenKind.BreakKw)) { var loc = CurrentLocation; Advance(); Expect(TokenKind.Semicolon, ";"); return new BreakStmt(loc); }
         if (Check(TokenKind.ContinueKw)) { var loc = CurrentLocation; Advance(); Expect(TokenKind.Semicolon, ";"); return new ContinueStmt(loc); }
 
@@ -323,6 +324,15 @@ public sealed class Parser(List<Token> tokens)
             value = ParseExpression();
         Expect(TokenKind.Semicolon, ";");
         return new ReturnStmt(value, loc);
+    }
+
+    private GoStmt ParseGo()
+    {
+        var loc = CurrentLocation;
+        Expect(TokenKind.GoKw, "go");
+        var sceneName = Expect(TokenKind.Identifier, "scene name").Text;
+        Expect(TokenKind.Semicolon, ";");
+        return new GoStmt(sceneName, loc);
     }
 
     private VarDeclStmt ParseLocalVarDecl()
