@@ -21,13 +21,7 @@ entry scene Scroller {
         scrollX -= 1;
         if (scrollX > 7) {
             scrollX = 7;
-            // Shift only row 12 left by one character (fast constant+offset addressing)
-            byte col = 0;
-            while (col < 39) {
-                poke: 0x05E0 + col value: (peek: 0x05E1 + col);
-                poke: 0xD9E0 + col value: (peek: 0xD9E1 + col);
-                col += 1;
-            }
+            shiftRowLeft: 12;
             // Feed next message character into rightmost column
             poke: 0x0607 value: message[msgPos];
             poke: 0xDA07 value: 1;
