@@ -32,7 +32,7 @@ public class SampleSnapshotTests
         var parser = new Parser(tokens);
         var program = parser.ParseProgram();
         var codeStart = PrgWriter.CalculateCodeStart();
-        var codeGen = new Phase1CodeGen(codeStart);
+        var codeGen = new CodeGenerator(codeStart);
         var (machineCode, _, _) = codeGen.Generate(program);
         var prg = PrgWriter.Create(machineCode);
 

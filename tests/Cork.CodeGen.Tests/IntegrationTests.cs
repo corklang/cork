@@ -25,7 +25,7 @@ public class IntegrationTests
         var program = parser.ParseProgram();
 
         var codeStart = PrgWriter.CalculateCodeStart();
-        var codeGen = new Phase1CodeGen(codeStart);
+        var codeGen = new CodeGenerator(codeStart);
         var (machineCode, entryPoint, _) = codeGen.Generate(program);
         var prg = PrgWriter.Create(machineCode);
 
@@ -40,45 +40,6 @@ public class IntegrationTests
 
         // Should be non-trivial
         await Assert.That(prg.Length).IsGreaterThan(20);
-    }
-
-    [Test]
-    public async Task CodeGenerator_produces_same_output_as_Phase1CodeGen()
-    {
-        var source = @"
-            entry scene Main {
-                hardware {
-                    border: 0;
-                    background: 6;
-                }
-                byte x = 0;
-                frame {
-                    x += 1;
-                    poke: 53280 value: x;
-                }
-            }
-        ";
-
-        var lexer = new Lexer(source);
-        var tokens = lexer.Tokenize();
-        var parser = new Parser(tokens);
-        var program = parser.ParseProgram();
-
-        var codeStart = PrgWriter.CalculateCodeStart();
-
-        var phase1 = new Phase1CodeGen(codeStart);
-        var (code1, entry1, _) = phase1.Generate(program);
-
-        var codeGen = new CodeGenerator(codeStart);
-        var (code2, entry2, _) = codeGen.Generate(program);
-
-        await Assert.That(entry1).IsEqualTo(entry2);
-        await Assert.That(code1.Length).IsEqualTo(code2.Length);
-
-        for (var i = 0; i < code1.Length; i++)
-        {
-            await Assert.That(code2[i]).IsEqualTo(code1[i]);
-        }
     }
 
     [Test]
