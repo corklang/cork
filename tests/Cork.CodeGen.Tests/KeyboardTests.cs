@@ -17,9 +17,9 @@ public class KeyboardTests
         var result = ControlFlowEmitter.IsKeyboardCheck(expr, out var colSelect, out var rowMask);
 
         await Assert.That(result).IsTrue();
-        // Space is column 4, row 7 → colSelect = ~(1<<4) = 0xEF, rowMask = 1<<7 = 0x80
-        await Assert.That(colSelect).IsEqualTo((byte)0xEF);
-        await Assert.That(rowMask).IsEqualTo((byte)0x80);
+        // Space is PA7, PB4 → colSelect = ~(1<<7) = 0x7F, rowMask = 1<<4 = 0x10
+        await Assert.That(colSelect).IsEqualTo((byte)0x7F);
+        await Assert.That(rowMask).IsEqualTo((byte)0x10);
     }
 
     [Test]
@@ -31,9 +31,9 @@ public class KeyboardTests
         var result = ControlFlowEmitter.IsKeyboardCheck(expr, out var colSelect, out var rowMask);
 
         await Assert.That(result).IsTrue();
-        // A is column 2, row 1 → colSelect = ~(1<<2) = 0xFB, rowMask = 1<<1 = 0x02
-        await Assert.That(colSelect).IsEqualTo((byte)0xFB);
-        await Assert.That(rowMask).IsEqualTo((byte)0x02);
+        // A is PA1, PB2 → colSelect = ~(1<<1) = 0xFD, rowMask = 1<<2 = 0x04
+        await Assert.That(colSelect).IsEqualTo((byte)0xFD);
+        await Assert.That(rowMask).IsEqualTo((byte)0x04);
     }
 
     [Test]
@@ -45,9 +45,9 @@ public class KeyboardTests
         var result = ControlFlowEmitter.IsKeyboardCheck(expr, out var colSelect, out var rowMask);
 
         await Assert.That(result).IsTrue();
-        // Return is column 1, row 0 → colSelect = ~(1<<1) = 0xFD, rowMask = 1<<0 = 0x01
-        await Assert.That(colSelect).IsEqualTo((byte)0xFD);
-        await Assert.That(rowMask).IsEqualTo((byte)0x01);
+        // Return is PA0, PB1 → colSelect = ~(1<<0) = 0xFE, rowMask = 1<<1 = 0x02
+        await Assert.That(colSelect).IsEqualTo((byte)0xFE);
+        await Assert.That(rowMask).IsEqualTo((byte)0x02);
     }
 
     [Test]
@@ -81,23 +81,23 @@ public class KeyboardTests
         var result = ControlFlowEmitter.IsKeyboardCheck(expr, out var colSelect, out var rowMask);
 
         await Assert.That(result).IsTrue();
-        // F1 is column 4, row 0 → colSelect = ~(1<<4) = 0xEF, rowMask = 1<<0 = 0x01
-        await Assert.That(colSelect).IsEqualTo((byte)0xEF);
-        await Assert.That(rowMask).IsEqualTo((byte)0x01);
+        // F1 is PA0, PB4 → colSelect = ~(1<<0) = 0xFE, rowMask = 1<<4 = 0x10
+        await Assert.That(colSelect).IsEqualTo((byte)0xFE);
+        await Assert.That(rowMask).IsEqualTo((byte)0x10);
     }
 
     [Test]
     public async Task IsKeyboardCheck_detects_number_keys()
     {
-        // n1 is column 0, row 7
+        // n1 is PA7, PB0
         var expr = new MemberAccessExpr(
             new IdentifierExpr("keyboard", Loc), "n1", Loc);
 
         var result = ControlFlowEmitter.IsKeyboardCheck(expr, out var colSelect, out var rowMask);
 
         await Assert.That(result).IsTrue();
-        await Assert.That(colSelect).IsEqualTo((byte)0xFE); // ~(1<<0)
-        await Assert.That(rowMask).IsEqualTo((byte)0x80);    // 1<<7
+        await Assert.That(colSelect).IsEqualTo((byte)0x7F); // ~(1<<7)
+        await Assert.That(rowMask).IsEqualTo((byte)0x01);    // 1<<0
     }
 
     [Test]
@@ -117,20 +117,19 @@ public class KeyboardTests
         ctx.ControlFlow.EmitConditionBranchTrue(condition, 3);
 
         var bytes = ctx.Buffer.ToArray();
-        // Should emit: LDA #$FF, STA $DC00, LDA #$EF, STA $DC00, NOP×4, LDA $DC01, AND #$80, BEQ
-        await Assert.That(bytes[0]).IsEqualTo((byte)0xA9); // LDA #$FF (deselect all)
-        await Assert.That(bytes[1]).IsEqualTo((byte)0xFF);
-        await Assert.That(bytes[2]).IsEqualTo((byte)0x8D); // STA $DC00
-        await Assert.That(bytes[5]).IsEqualTo((byte)0xA9); // LDA #$EF (select column 4)
-        await Assert.That(bytes[6]).IsEqualTo((byte)0xEF);
-        await Assert.That(bytes[7]).IsEqualTo((byte)0x8D); // STA $DC00
-        // NOPs at bytes 10-13
-        await Assert.That(bytes[10]).IsEqualTo((byte)0xEA); // NOP
-        // LDA $DC01 at byte 14
-        await Assert.That(bytes[14]).IsEqualTo((byte)0xAD); // LDA abs
-        await Assert.That(bytes[15]).IsEqualTo((byte)0x01); // $DC01 lo
-        await Assert.That(bytes[16]).IsEqualTo((byte)0xDC); // $DC01 hi
-        await Assert.That(bytes[17]).IsEqualTo((byte)0x29); // AND #imm
-        await Assert.That(bytes[18]).IsEqualTo((byte)0x80); // row mask for space
+        // Should emit: LDA #$7F, STA $DC00, LDA $DC01, AND #$10, BEQ +3
+        // Space is PA7 ($DC00 = ~(1<<7) = $7F), PB4 ($DC01 mask = 1<<4 = $10)
+        await Assert.That(bytes[0]).IsEqualTo((byte)0xA9); // LDA #imm
+        await Assert.That(bytes[1]).IsEqualTo((byte)0x7F); // PA7 drive value
+        await Assert.That(bytes[2]).IsEqualTo((byte)0x8D); // STA abs
+        await Assert.That(bytes[3]).IsEqualTo((byte)0x00); // $DC00 lo
+        await Assert.That(bytes[4]).IsEqualTo((byte)0xDC); // $DC00 hi
+        await Assert.That(bytes[5]).IsEqualTo((byte)0xAD); // LDA abs
+        await Assert.That(bytes[6]).IsEqualTo((byte)0x01); // $DC01 lo
+        await Assert.That(bytes[7]).IsEqualTo((byte)0xDC); // $DC01 hi
+        await Assert.That(bytes[8]).IsEqualTo((byte)0x29); // AND #imm
+        await Assert.That(bytes[9]).IsEqualTo((byte)0x10); // PB4 mask for space
+        await Assert.That(bytes[10]).IsEqualTo((byte)0xF0); // BEQ
+        await Assert.That(bytes[11]).IsEqualTo((byte)0x03); // +3 skip
     }
 }

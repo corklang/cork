@@ -12,19 +12,27 @@
 //
 // Functions below scan the matrix directly (no KERNAL IRQ needed).
 
-// Column select values for CIA1 $DC00 (active low)
+// PA drive values for CIA1 $DC00 (active low: one bit cleared per column)
 const byte[8] _kbdCols = { 0xFE, 0xFD, 0xFB, 0xF7, 0xEF, 0xDF, 0xBF, 0x7F };
 
-// Matrix position → PETSCII code (0 = modifier key, skip)
+// Matrix position (PA*8+PB) → PETSCII code (0 = modifier key, skip)
+// PA0: DEL  RET  →    F7   F1   F3   F5   ↓
+// PA1: 3    W    A    4    Z    S    E    LSHFT
+// PA2: 5    R    D    6    C    F    T    X
+// PA3: 7    Y    G    8    B    H    U    V
+// PA4: 9    I    J    0    M    K    O    N
+// PA5: +    P    L    -    .    :    @    ,
+// PA6: £    *    ;    HOME RSHFT =   ↑    /
+// PA7: 1    ←    CTRL 2    SPACE C=  Q    STOP
 const byte[64] _kbdPetscii = {
-    20, 51, 53, 55, 57, 43, 92, 49,
-    13, 87, 82, 89, 73, 80, 42, 95,
-    29, 65, 68, 71, 74, 76, 59,  0,
-   136, 52, 54, 56, 48, 45, 19, 50,
-   133, 90, 67, 66, 77, 46,  0, 32,
-   134, 83, 70, 72, 75, 58, 61,  0,
-   135, 69, 84, 85, 79, 64, 94, 81,
-    17,  0, 88, 86, 78, 44, 47,  3
+    20, 13, 29,136,133,134,135, 17,
+    51, 87, 65, 52, 90, 83, 69,  0,
+    53, 82, 68, 54, 67, 70, 84, 88,
+    55, 89, 71, 56, 66, 72, 85, 86,
+    57, 73, 74, 48, 77, 75, 79, 78,
+    43, 80, 76, 45, 46, 58, 64, 44,
+    92, 42, 59, 19,  0, 61, 94, 47,
+    49, 95,  0, 50, 32,  0, 81,  3
 };
 
 // PETSCII key codes for comparisons
@@ -47,8 +55,6 @@ byte getKey: {
     byte _col = 0;
     while (_col < 8) {
         poke: 0xDC00 value: _kbdCols[_col];
-        // CIA matrix settling: dummy read before real read
-        byte _settle = (peek: 0xDC01);
         byte _rows = (peek: 0xDC01);
         if (_rows != 0xFF) {
             byte _row = 0;

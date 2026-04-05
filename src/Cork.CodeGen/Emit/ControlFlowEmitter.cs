@@ -336,17 +336,9 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
 
         if (IsKeyboardCheck(condition, out var colSelect, out var rowMask))
         {
-            // Deselect all columns first, then select target — ensures clean transition
-            ctx.Buffer.EmitLdaImmediate(0xFF);
-            ctx.Buffer.EmitStaAbsolute(0xDC00);
+            // Drive keyboard column via CIA1 Port A, read row from Port B
             ctx.Buffer.EmitLdaImmediate(colSelect);
             ctx.Buffer.EmitStaAbsolute(0xDC00);
-            // Settling time: CIA needs ~8μs for keyboard matrix lines to stabilize
-            ctx.Buffer.EmitNop();
-            ctx.Buffer.EmitNop();
-            ctx.Buffer.EmitNop();
-            ctx.Buffer.EmitNop();
-            // Read row bits from CIA1 Port B (active low: 0 = pressed)
             ctx.Buffer.EmitLdaAbsolute(0xDC01);
             ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(rowMask); // AND #rowMask
             ctx.Buffer.EmitBeq((sbyte)skipBytes); // BEQ = bit clear = key pressed
@@ -473,9 +465,10 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
     }
 
     /// <summary>
-    /// Detects keyboard.KEY_NAME conditions and returns the CIA1 column select
-    /// byte ($DC00 write) and row bit mask ($DC01 read).
-    /// C64 keyboard is an 8×8 matrix scanned via CIA1: active low on both sides.
+    /// Detects keyboard.KEY_NAME conditions and returns the CIA1 PA drive
+    /// byte ($DC00 write) and PB read mask ($DC01 read).
+    /// C64 keyboard is an 8×8 matrix: PA0-7 ($DC00) drive columns,
+    /// PB0-7 ($DC01) read rows. Both active low.
     /// </summary>
     public static bool IsKeyboardCheck(ExprNode expr, out byte colSelect, out byte rowMask)
     {
@@ -485,44 +478,53 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
         {
             if (!KeyMatrix.TryGetValue(keyAccess.MemberName, out var entry))
                 return false;
-            colSelect = (byte)~(1 << entry.Col); // active low: clear the target column bit
-            rowMask = (byte)(1 << entry.Row);
+            colSelect = (byte)~(1 << entry.Pa); // drive PA bit low
+            rowMask = (byte)(1 << entry.Pb);     // read PB bit
             return true;
         }
         return false;
     }
 
-    // C64 keyboard matrix: key name → (column 0-7, row 0-7)
-    // Column selects $DC00 (write, active low), row reads $DC01 (read, active low)
-    private static readonly Dictionary<string, (int Col, int Row)> KeyMatrix = new()
+    // C64 keyboard matrix: key name → (PA bit for $DC00, PB bit for $DC01)
+    // Visual layout — rows are PA lines, columns are PB lines:
+    //       PB0   PB1   PB2   PB3   PB4   PB5   PB6   PB7
+    // PA0:  DEL   RET   →     F7    F1    F3    F5    ↓
+    // PA1:  3     W     A     4     Z     S     E     LSHFT
+    // PA2:  5     R     D     6     C     F     T     X
+    // PA3:  7     Y     G     8     B     H     U     V
+    // PA4:  9     I     J     0     M     K     O     N
+    // PA5:  +     P     L     -     .     :     @     ,
+    // PA6:  £     *     ;     HOME  RSHFT =     ↑     /
+    // PA7:  1     ←     CTRL  2     SPACE C=    Q     STOP
+    private static readonly Dictionary<string, (int Pa, int Pb)> KeyMatrix = new()
     {
-        // Row 0
-        ["del"] = (0, 0), ["return"] = (1, 0), ["cursorRight"] = (2, 0),
-        ["f7"] = (3, 0), ["f1"] = (4, 0), ["f3"] = (5, 0), ["f5"] = (6, 0),
-        ["cursorDown"] = (7, 0),
-        // Row 1
-        ["n3"] = (0, 1), ["w"] = (1, 1), ["a"] = (2, 1), ["n4"] = (3, 1),
-        ["z"] = (4, 1), ["s"] = (5, 1), ["e"] = (6, 1), ["leftShift"] = (7, 1),
-        // Row 2
-        ["n5"] = (0, 2), ["r"] = (1, 2), ["d"] = (2, 2), ["n6"] = (3, 2),
-        ["c"] = (4, 2), ["f"] = (5, 2), ["t"] = (6, 2), ["x"] = (7, 2),
-        // Row 3
-        ["n7"] = (0, 3), ["y"] = (1, 3), ["g"] = (2, 3), ["n8"] = (3, 3),
-        ["b"] = (4, 3), ["h"] = (5, 3), ["u"] = (6, 3), ["v"] = (7, 3),
-        // Row 4
-        ["n9"] = (0, 4), ["i"] = (1, 4), ["j"] = (2, 4), ["n0"] = (3, 4),
-        ["m"] = (4, 4), ["k"] = (5, 4), ["o"] = (6, 4), ["n"] = (7, 4),
-        // Row 5
-        ["plus"] = (0, 5), ["p"] = (1, 5), ["l"] = (2, 5), ["minus"] = (3, 5),
-        ["period"] = (4, 5), ["colon"] = (5, 5), ["at"] = (6, 5), ["comma"] = (7, 5),
-        // Row 6
-        ["pound"] = (0, 6), ["star"] = (1, 6), ["semicolon"] = (2, 6),
-        ["home"] = (3, 6), ["rightShift"] = (4, 6), ["equals"] = (5, 6),
-        ["upArrow"] = (6, 6), ["slash"] = (7, 6),
-        // Row 7
-        ["n1"] = (0, 7), ["leftArrow"] = (1, 7), ["ctrl"] = (2, 7),
-        ["n2"] = (3, 7), ["space"] = (4, 7), ["commodore"] = (5, 7),
-        ["q"] = (6, 7), ["runStop"] = (7, 7),
+        // PA0: DEL RET → F7 F1 F3 F5 ↓
+        ["del"] = (0, 0), ["return"] = (0, 1), ["cursorRight"] = (0, 2),
+        ["f7"] = (0, 3), ["f1"] = (0, 4), ["f3"] = (0, 5), ["f5"] = (0, 6),
+        ["cursorDown"] = (0, 7),
+        // PA1: 3 W A 4 Z S E LSHFT
+        ["n3"] = (1, 0), ["w"] = (1, 1), ["a"] = (1, 2), ["n4"] = (1, 3),
+        ["z"] = (1, 4), ["s"] = (1, 5), ["e"] = (1, 6), ["leftShift"] = (1, 7),
+        // PA2: 5 R D 6 C F T X
+        ["n5"] = (2, 0), ["r"] = (2, 1), ["d"] = (2, 2), ["n6"] = (2, 3),
+        ["c"] = (2, 4), ["f"] = (2, 5), ["t"] = (2, 6), ["x"] = (2, 7),
+        // PA3: 7 Y G 8 B H U V
+        ["n7"] = (3, 0), ["y"] = (3, 1), ["g"] = (3, 2), ["n8"] = (3, 3),
+        ["b"] = (3, 4), ["h"] = (3, 5), ["u"] = (3, 6), ["v"] = (3, 7),
+        // PA4: 9 I J 0 M K O N
+        ["n9"] = (4, 0), ["i"] = (4, 1), ["j"] = (4, 2), ["n0"] = (4, 3),
+        ["m"] = (4, 4), ["k"] = (4, 5), ["o"] = (4, 6), ["n"] = (4, 7),
+        // PA5: + P L - . : @ ,
+        ["plus"] = (5, 0), ["p"] = (5, 1), ["l"] = (5, 2), ["minus"] = (5, 3),
+        ["period"] = (5, 4), ["colon"] = (5, 5), ["at"] = (5, 6), ["comma"] = (5, 7),
+        // PA6: £ * ; HOME RSHFT = ↑ /
+        ["pound"] = (6, 0), ["star"] = (6, 1), ["semicolon"] = (6, 2),
+        ["home"] = (6, 3), ["rightShift"] = (6, 4), ["equals"] = (6, 5),
+        ["upArrow"] = (6, 6), ["slash"] = (6, 7),
+        // PA7: 1 ← CTRL 2 SPACE C= Q STOP
+        ["n1"] = (7, 0), ["leftArrow"] = (7, 1), ["ctrl"] = (7, 2),
+        ["n2"] = (7, 3), ["space"] = (7, 4), ["commodore"] = (7, 5),
+        ["q"] = (7, 6), ["runStop"] = (7, 7),
     };
 
     public void EmitWordComparisonBranchTrue(string varName, TokenKind op, ushort literal, int skipBytes)
