@@ -1,8 +1,10 @@
-// Feature: keyboard input — direct scanning and matrix-based getKey
+// Feature: keyboard input — direct scanning and debounced text entry
 
 import "../stdlib/keyboard.cork";
 import "../stdlib/screen.cork";
 import "../stdlib/print.cork";
+
+byte nameLen = 0;
 
 entry scene Demo {
     hardware {
@@ -20,7 +22,6 @@ entry scene Demo {
     }
 
     frame {
-        // Direct key scanning — instant response
         if (keyboard.w) { if (posY > 1)  { posY -= 1; } }
         if (keyboard.s) { if (posY < 23) { posY += 1; } }
         if (keyboard.a) { if (posX > 0)  { posX -= 1; } }
@@ -31,12 +32,10 @@ entry scene Demo {
             if (color > 15) { color = 1; }
         }
 
-        if (keyboard.q) { go TypeDemo; }
+        if (keyboard.q) { go NameEntry; }
 
-        // Update border color to show responsiveness
         poke: 0xD020 value: color;
 
-        // Show position
         printAt: 40 text: "X=";
         printByte: posX at: 0x042A;
         printAt: 46 text: "Y=";
@@ -44,30 +43,90 @@ entry scene Demo {
     }
 }
 
-scene TypeDemo {
+scene NameEntry {
     hardware {
-        border: Color.blue;
+        border: Color.lightBlue;
         background: Color.blue;
     }
 
-    byte pos = 80;
+    byte prevKey = 0;
 
     enter {
         clearScreen:;
-        printAt: 0 text: "TYPE SOMETHING (F1=BACK)";
+        nameLen = 0;
+        printAt: 0 text: "ENTER YOUR NAME:";
+        printAt: 80 text: "RETURN=OK  DEL=BACK  F1=CANCEL";
+        // Cursor on input line (screen $0428 = row 1, col 0)
+        poke: 0x0428 value: 166;
     }
 
     frame {
-        // Direct scan for back button (always responsive)
         if (keyboard.f1) { go Demo; }
 
-        // Matrix-scanned getKey for text input (no KERNAL needed)
         byte key = (getKey:);
-        if (key != 0) {
-            byte sc = (toScreenCode: key);
-            poke: 0x0400 + pos value: sc;
-            pos += 1;
-            if (pos > 199) { pos = 80; }
+
+        // Debounce: only act when key state changes
+        if (key != prevKey) {
+            if (key != 0) {
+                if (key == KEY_DEL) {
+                    if (nameLen > 0) {
+                        poke: 0x0428 + nameLen value: 32;
+                        nameLen -= 1;
+                        poke: 0x0428 + nameLen value: 166;
+                    }
+                } else {
+                    if (key == KEY_RETURN) {
+                        poke: 0x0428 + nameLen value: 32;
+                        go Greeting;
+                    } else {
+                        if (nameLen < 16) {
+                            byte sc = (toScreenCode: key);
+                            poke: 0x0428 + nameLen value: sc;
+                            nameLen += 1;
+                            poke: 0x0428 + nameLen value: 166;
+                        }
+                    }
+                }
+            }
+            prevKey = key;
         }
+    }
+}
+
+scene Greeting {
+    hardware {
+        border: Color.green;
+        background: Color.black;
+    }
+
+    enter {
+        // Copy name from NameEntry screen to greeting position
+        // before clearScreen overwrites it. Use $0200-$020F as temp
+        // (cassette buffer — safe to use, not needed by Cork programs).
+        byte i = 0;
+        while (i < nameLen) {
+            byte ch = (peek: 0x0428 + i);
+            poke: 0x0200 + i value: ch;
+            i += 1;
+        }
+
+        clearScreen:;
+        printAt: 0 text: "HELLO, ";
+
+        // Copy name from temp to screen
+        i = 0;
+        while (i < nameLen) {
+            byte ch = (peek: 0x0200 + i);
+            poke: 0x0407 + i value: ch;
+            i += 1;
+        }
+        poke: 0x0407 + nameLen value: 33;
+
+        printAt: 80 text: "PRESS ANY KEY";
+    }
+
+    frame {
+        byte key = (getKey:);
+        if (key != 0) { go Demo; }
     }
 }
