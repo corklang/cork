@@ -475,7 +475,7 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         // Set or clear based on saved carry flag
         ctx.Buffer.EmitByte(0x28); // PLP
         var clearLabel = ctx.NextLabel("_plotclr");
-        ctx.Buffer.EmitBcs(7); // BCS → clear path (ORA+STA+RTS = 7 bytes ahead)
+        ctx.Buffer.EmitBcs(5); // BCS → clear path (skip ORA(2)+STA(2)+RTS(1) = 5 bytes)
 
         // Set pixel: ORA existing byte
         ctx.Buffer.EmitByte(0x11); ctx.Buffer.EmitByte(EmitContext.ZpPointerLo); // ORA ($FB),Y
