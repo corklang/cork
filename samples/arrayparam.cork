@@ -33,7 +33,7 @@ entry scene Demo {
         poke: 0xD020 value: s;
     }
 
-    frame {}
+    frame { }
 }
 
 const byte[5] message = { 8, 5, 12, 12, 15 };
