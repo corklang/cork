@@ -102,8 +102,8 @@ entry scene Demo {
         by0 = ballY - 1;
         plotPixel: ballX y: by0;
 
-        // Cycle border color every 4 frames for flair
+        // Subtle border pulse
         tick += 1;
-        poke: 0xD020 value: tick >> 2;
+        poke: 0xD020 value: tick >> 5;
     }
 }
