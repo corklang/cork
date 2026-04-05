@@ -248,14 +248,29 @@ public sealed class SymbolTable
     public bool TryGetMethodParams(string selectorName, out List<MethodParameter> parameters) =>
         _methodParams.TryGetValue(selectorName, out parameters!);
 
+    // High-water mark for method locals — ensures each method gets its own
+    // non-overlapping ZP region so nested calls don't clobber each other.
+    private byte _methodLocalsHighWater;
+
     /// <summary>
-    /// Prepare ZP for method body locals. Locals start after the param zone
-    /// so they don't overlap with the caller's scene/enter block locals.
-    /// Called before each global method body emission.
+    /// Prepare ZP for method body locals. Each method gets a unique region
+    /// that doesn't overlap with other methods (important for nested calls).
     /// </summary>
     public void PrepareMethodLocals()
     {
-        _nextZp = _paramZoneEnd;
+        if (_methodLocalsHighWater < _paramZoneEnd)
+            _methodLocalsHighWater = _paramZoneEnd;
+        _nextZp = _methodLocalsHighWater;
+    }
+
+    /// <summary>
+    /// Called after method body emission to record how much ZP this method used.
+    /// The next method's locals will start after this method's.
+    /// </summary>
+    public void FinalizeMethodLocals()
+    {
+        if (_nextZp > _methodLocalsHighWater)
+            _methodLocalsHighWater = _nextZp;
     }
 
     /// <summary>

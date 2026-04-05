@@ -17,13 +17,17 @@ entry scene Demo {
     byte posX = 20;
     byte posY = 12;
     byte color = 1;
+    word screenPos = 0x0400;
 
     enter {
         clearScreen:;
-        printAt: 0 text: "WASD CHANGES X/Y  SPACE=COLOR  Q=NEXT";
+        printAt: 0 text: "WASD=MOVE SPACE=COLOR Q=NEXT";
     }
 
     frame {
+        // Erase old cursor
+        poke: screenPos value: 32;
+
         if (keyboard.w) { if (posY > 1)  { posY -= 1; } }
         if (keyboard.s) { if (posY < 23) { posY += 1; } }
         if (keyboard.a) { if (posX > 0)  { posX -= 1; } }
@@ -36,12 +40,20 @@ entry scene Demo {
 
         if (keyboard.q) { go NameEntry; }
 
-        poke: 0xD020 value: color;
+        // Compute screen position: $0400 + posY * 40 + posX
+        screenPos = 0x0400;
+        screenPos += posY * 40;
+        screenPos += posX;
 
-        printAt: 40 text: "X=";
-        printByte: posX at: 0x042A;
-        printAt: 46 text: "Y=";
-        printByte: posY at: 0x0430;
+        // Draw cursor
+        poke: screenPos value: 81;
+        // Color the cursor
+        word colorPos = 0xD800;
+        colorPos += posY * 40;
+        colorPos += posX;
+        poke: colorPos value: color;
+
+        poke: 0xD020 value: color;
     }
 }
 

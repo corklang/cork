@@ -240,12 +240,12 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
     {
         var label = $"_method_{gm.SelectorName}";
         ctx.Buffer.DefineLabel(label);
-        // Method locals go AFTER the param zone so they don't overlap with caller locals.
-        // Reset to method locals base each time — methods share this space (non-reentrant).
+        // Each method gets its own non-overlapping local zone so nested calls work.
         ctx.Symbols.PrepareMethodLocals();
         ctx.Symbols.InstallMethodParamLocals(gm.SelectorName, gm.Parameters);
         ctx.Statements.EmitBlock(gm.Body);
         ctx.Symbols.RemoveMethodParamLocals(gm.Parameters);
+        ctx.Symbols.FinalizeMethodLocals();
         ctx.Buffer.EmitRts();
     }
 
