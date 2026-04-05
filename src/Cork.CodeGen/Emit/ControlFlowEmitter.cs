@@ -334,6 +334,23 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             return;
         }
 
+        if (IsKeyboardCheck(condition, out var colSelect, out var rowMask))
+        {
+            // Select keyboard matrix column via CIA1 Port A
+            ctx.Buffer.EmitLdaImmediate(colSelect);
+            ctx.Buffer.EmitStaAbsolute(0xDC00);
+            // Read row bits from CIA1 Port B (active low: 0 = pressed)
+            ctx.Buffer.EmitLdaAbsolute(0xDC01);
+            ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(rowMask); // AND #rowMask
+            // Restore $DC00 to $FF (deselect all columns) so joystick reads work
+            ctx.Buffer.EmitPha();
+            ctx.Buffer.EmitLdaImmediate(0xFF);
+            ctx.Buffer.EmitStaAbsolute(0xDC00);
+            ctx.Buffer.EmitPla();
+            ctx.Buffer.EmitBeq((sbyte)skipBytes); // BEQ = bit clear = key pressed
+            return;
+        }
+
         if (condition is BinaryExpr wordBin &&
             wordBin.Left is IdentifierExpr wordIdent &&
             ctx.Symbols.IsWordVar(wordIdent.Name))
@@ -452,6 +469,59 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
         }
         return false;
     }
+
+    /// <summary>
+    /// Detects keyboard.KEY_NAME conditions and returns the CIA1 column select
+    /// byte ($DC00 write) and row bit mask ($DC01 read).
+    /// C64 keyboard is an 8×8 matrix scanned via CIA1: active low on both sides.
+    /// </summary>
+    public static bool IsKeyboardCheck(ExprNode expr, out byte colSelect, out byte rowMask)
+    {
+        colSelect = 0;
+        rowMask = 0;
+        if (expr is MemberAccessExpr { Receiver: IdentifierExpr { Name: "keyboard" } } keyAccess)
+        {
+            if (!KeyMatrix.TryGetValue(keyAccess.MemberName, out var entry))
+                return false;
+            colSelect = (byte)~(1 << entry.Col); // active low: clear the target column bit
+            rowMask = (byte)(1 << entry.Row);
+            return true;
+        }
+        return false;
+    }
+
+    // C64 keyboard matrix: key name → (column 0-7, row 0-7)
+    // Column selects $DC00 (write, active low), row reads $DC01 (read, active low)
+    private static readonly Dictionary<string, (int Col, int Row)> KeyMatrix = new()
+    {
+        // Row 0
+        ["del"] = (0, 0), ["return"] = (1, 0), ["cursorRight"] = (2, 0),
+        ["f7"] = (3, 0), ["f1"] = (4, 0), ["f3"] = (5, 0), ["f5"] = (6, 0),
+        ["cursorDown"] = (7, 0),
+        // Row 1
+        ["n3"] = (0, 1), ["w"] = (1, 1), ["a"] = (2, 1), ["n4"] = (3, 1),
+        ["z"] = (4, 1), ["s"] = (5, 1), ["e"] = (6, 1), ["leftShift"] = (7, 1),
+        // Row 2
+        ["n5"] = (0, 2), ["r"] = (1, 2), ["d"] = (2, 2), ["n6"] = (3, 2),
+        ["c"] = (4, 2), ["f"] = (5, 2), ["t"] = (6, 2), ["x"] = (7, 2),
+        // Row 3
+        ["n7"] = (0, 3), ["y"] = (1, 3), ["g"] = (2, 3), ["n8"] = (3, 3),
+        ["b"] = (4, 3), ["h"] = (5, 3), ["u"] = (6, 3), ["v"] = (7, 3),
+        // Row 4
+        ["n9"] = (0, 4), ["i"] = (1, 4), ["j"] = (2, 4), ["n0"] = (3, 4),
+        ["m"] = (4, 4), ["k"] = (5, 4), ["o"] = (6, 4), ["n"] = (7, 4),
+        // Row 5
+        ["plus"] = (0, 5), ["p"] = (1, 5), ["l"] = (2, 5), ["minus"] = (3, 5),
+        ["period"] = (4, 5), ["colon"] = (5, 5), ["at"] = (6, 5), ["comma"] = (7, 5),
+        // Row 6
+        ["pound"] = (0, 6), ["star"] = (1, 6), ["semicolon"] = (2, 6),
+        ["home"] = (3, 6), ["rightShift"] = (4, 6), ["equals"] = (5, 6),
+        ["upArrow"] = (6, 6), ["slash"] = (7, 6),
+        // Row 7
+        ["n1"] = (0, 7), ["leftArrow"] = (1, 7), ["ctrl"] = (2, 7),
+        ["n2"] = (3, 7), ["space"] = (4, 7), ["commodore"] = (5, 7),
+        ["q"] = (6, 7), ["runStop"] = (7, 7),
+    };
 
     public void EmitWordComparisonBranchTrue(string varName, TokenKind op, ushort literal, int skipBytes)
     {

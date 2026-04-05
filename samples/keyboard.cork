@@ -1,0 +1,72 @@
+// Feature: keyboard input — direct scanning and KERNAL buffer
+
+import "../stdlib/keyboard.cork";
+import "../stdlib/screen.cork";
+import "../stdlib/print.cork";
+
+entry scene Demo {
+    hardware {
+        border: Color.darkGrey;
+        background: Color.black;
+    }
+
+    byte posX = 20;
+    byte posY = 12;
+    byte color = 1;
+
+    enter {
+        clearScreen:;
+        printAt: 0 text: "WASD=MOVE SPACE=COLOR Q=QUIT";
+    }
+
+    frame {
+        // Direct key scanning — instant response, no KERNAL buffer
+        if (keyboard.w) { if (posY > 1)  { posY -= 1; } }
+        if (keyboard.s) { if (posY < 23) { posY += 1; } }
+        if (keyboard.a) { if (posX > 0)  { posX -= 1; } }
+        if (keyboard.d) { if (posX < 39) { posX += 1; } }
+
+        if (keyboard.space) {
+            color += 1;
+            if (color > 15) { color = 1; }
+        }
+
+        if (keyboard.q) { go TypeDemo; }
+
+        // Update border color to show responsiveness
+        poke: 0xD020 value: color;
+
+        // Show position
+        printAt: 40 text: "X=";
+        printByte: posX at: 0x042A;
+        printAt: 46 text: "Y=";
+        printByte: posY at: 0x0430;
+    }
+}
+
+scene TypeDemo {
+    hardware {
+        border: Color.blue;
+        background: Color.blue;
+    }
+
+    byte pos = 80;
+
+    enter {
+        clearScreen:;
+        printAt: 0 text: "TYPE SOMETHING (F1=BACK)";
+    }
+
+    frame {
+        // KERNAL buffer reading — returns PETSCII codes
+        byte key = (getKey:);
+        if (key != 0) {
+            if (key == KEY_F1) { go Demo; }
+
+            // Display typed characters on screen
+            poke: 0x0400 + pos value: key;
+            pos += 1;
+            if (pos > 199) { pos = 80; }
+        }
+    }
+}

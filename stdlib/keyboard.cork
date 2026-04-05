@@ -1,0 +1,70 @@
+// Cork Standard Library: Keyboard Input
+// import "../stdlib/keyboard.cork";
+//
+// Direct key scanning: use keyboard.KEY_NAME in conditions:
+//   if (keyboard.space) { ... }
+//   if (keyboard.a) { ... }
+//
+// Key names: a-z, n0-n9, space, return, del, home,
+//   f1/f3/f5/f7, cursorDown/cursorRight, leftShift/rightShift,
+//   ctrl, commodore, runStop, plus/minus/star/slash/equals,
+//   period/comma/colon/semicolon/at/pound, leftArrow/upArrow
+//
+// KERNAL buffer functions below for text input scenarios.
+
+// PETSCII key codes for use with getKey:/waitForKey:
+const byte KEY_RETURN = 13;
+const byte KEY_SPACE = 32;
+const byte KEY_DEL = 20;
+const byte KEY_HOME = 19;
+const byte KEY_CURSOR_DOWN = 17;
+const byte KEY_CURSOR_UP = 145;
+const byte KEY_CURSOR_RIGHT = 29;
+const byte KEY_CURSOR_LEFT = 157;
+const byte KEY_F1 = 133;
+const byte KEY_F3 = 134;
+const byte KEY_F5 = 135;
+const byte KEY_F7 = 136;
+const byte KEY_RUN_STOP = 3;
+
+// Read a key from the KERNAL keyboard buffer.
+// Returns the PETSCII code of the key, or 0 if no key was pressed.
+// The buffer is cleared after reading.
+byte getKey: {
+    byte _count = (peek: 198);
+    if (_count == 0) { return 0; }
+    byte _key = (peek: 631);
+    poke: 198 value: 0;
+    return _key;
+}
+
+// Wait until a key is pressed and return its PETSCII code.
+byte waitForKey: {
+    byte _key = 0;
+    while (_key == 0) {
+        _key = (getKey:);
+    }
+    return _key;
+}
+
+// Check if any key is currently pressed (direct scan).
+// Selects all columns and reads rows — any 0 bit means a key is down.
+byte anyKeyPressed: {
+    poke: 0xDC00 value: 0;
+    byte _rows = (peek: 0xDC01);
+    poke: 0xDC00 value: 0xFF;
+    if (_rows != 0xFF) { return 1; }
+    return 0;
+}
+
+// Wait for any key press then release (debounced).
+waitForKeyPress: {
+    byte _down = 0;
+    while (_down == 0) {
+        _down = (anyKeyPressed:);
+    }
+    byte _up = 1;
+    while (_up != 0) {
+        _up = (anyKeyPressed:);
+    }
+}
