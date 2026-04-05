@@ -1,15 +1,39 @@
 import * as vscode from "vscode";
 import { CorkCompiler } from "./compiler";
 import { CorkTaskProvider } from "./taskProvider";
+import { CorkCompletionProvider } from "./completionProvider";
+import { CorkHoverProvider } from "./hoverProvider";
+import { CorkFormattingProvider } from "./formatProvider";
+
+const CORK_SELECTOR: vscode.DocumentSelector = { language: "cork", scheme: "file" };
 
 let compiler: CorkCompiler;
-let taskProvider: vscode.Disposable;
 
 export function activate(context: vscode.ExtensionContext) {
   compiler = new CorkCompiler(context);
 
-  taskProvider = vscode.tasks.registerTaskProvider("cork", new CorkTaskProvider());
-  context.subscriptions.push(taskProvider);
+  context.subscriptions.push(
+    vscode.tasks.registerTaskProvider("cork", new CorkTaskProvider())
+  );
+
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      CORK_SELECTOR,
+      new CorkCompletionProvider(),
+      ".", ":"
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.languages.registerHoverProvider(CORK_SELECTOR, new CorkHoverProvider())
+  );
+
+  context.subscriptions.push(
+    vscode.languages.registerDocumentFormattingEditProvider(
+      CORK_SELECTOR,
+      new CorkFormattingProvider()
+    )
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("cork.build", () => {
