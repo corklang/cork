@@ -62,7 +62,7 @@ entry scene Demo {
         computeCursor:;
 
         // Draw cursor
-        poke: cursorScreen value: 160;
+        poke: cursorScreen value: 81;
         poke: cursorColor value: color;
         poke: 0xD020 value: color;
     }
@@ -79,7 +79,7 @@ scene NameEntry {
         nameLen = 0;
         printAt: 0 text: "ENTER YOUR NAME:";
         printAt: 80 text: "RETURN=OK  DEL=BACK  F1=CANCEL";
-        poke: 0x0428 value: 166;
+        poke: 0x0428 value: 160;
     }
 
     frame {
@@ -91,7 +91,7 @@ scene NameEntry {
                 if (nameLen > 0) {
                     poke: 0x0428 + nameLen value: 32;
                     nameLen -= 1;
-                    poke: 0x0428 + nameLen value: 166;
+                    poke: 0x0428 + nameLen value: 160;
                 }
             } else {
                 if (key == KEY_RETURN) {
@@ -103,7 +103,7 @@ scene NameEntry {
                         nameBuffer[nameLen] = sc;
                         poke: 0x0428 + nameLen value: sc;
                         nameLen += 1;
-                        poke: 0x0428 + nameLen value: 166;
+                        poke: 0x0428 + nameLen value: 160;
                     }
                 }
             }
