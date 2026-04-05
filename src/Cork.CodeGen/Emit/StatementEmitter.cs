@@ -356,6 +356,46 @@ public sealed class StatementEmitter(EmitContext ctx)
             return;
         }
 
+        // Try to resolve as 16-bit literal; if not, evaluate as byte expression
+        var isLiteral = value is IntLiteralExpr or FixedLiteralExpr or UnaryExpr;
+        if (!isLiteral && ctx.Expressions.TryFoldConstant(value, out _))
+            isLiteral = true;
+
+        if (!isLiteral && op is TokenKind.PlusEqual or TokenKind.MinusEqual or TokenKind.Equal)
+        {
+            // Runtime byte expression widened to word
+            if (op == TokenKind.Equal)
+            {
+                ctx.Expressions.EmitExprToA(value);
+                ctx.Buffer.EmitStaZeroPage(zpLo);
+                ctx.Buffer.EmitLdaImmediate(0);
+                ctx.Buffer.EmitStaZeroPage(zpHi);
+            }
+            else if (op == TokenKind.PlusEqual)
+            {
+                ctx.Expressions.EmitExprToA(value);
+                ctx.Buffer.EmitClc();
+                ctx.Buffer.EmitAdcZeroPage(zpLo);
+                ctx.Buffer.EmitStaZeroPage(zpLo);
+                ctx.Buffer.EmitLdaZeroPage(zpHi);
+                ctx.Buffer.EmitAdcImmediate(0);
+                ctx.Buffer.EmitStaZeroPage(zpHi);
+            }
+            else // MinusEqual
+            {
+                ctx.Expressions.EmitExprToA(value);
+                ctx.Buffer.EmitStaZeroPage(0x0F); // temp
+                ctx.Buffer.EmitLdaZeroPage(zpLo);
+                ctx.Buffer.EmitSec();
+                ctx.Buffer.EmitSbcZeroPage(0x0F);
+                ctx.Buffer.EmitStaZeroPage(zpLo);
+                ctx.Buffer.EmitLdaZeroPage(zpHi);
+                ctx.Buffer.EmitSbcImmediate(0);
+                ctx.Buffer.EmitStaZeroPage(zpHi);
+            }
+            return;
+        }
+
         var val = ExpressionEmitter.Resolve16BitInitializer("", value);
 
         if (op == TokenKind.Equal)
