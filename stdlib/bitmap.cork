@@ -26,13 +26,18 @@ fillBitmap: (byte pattern) {
     }
 }
 
-// Set bitmap cell colors (screen RAM: hi nybble = fg, lo nybble = bg)
+// Set bitmap cell colors (screen RAM + color RAM)
+// Screen RAM ($0400): hi nybble = fg, lo nybble = bg
+// Color RAM ($D800): cleared to 0 to prevent boot screen bleed-through
 setBitmapColors: (byte fg) bg: (byte bg) {
     byte colorByte = fg * 16 + bg;
     word addr = 0x0400;
+    word caddr = 0xD800;
     while (addr < 0x07E8) {
         poke: addr value: colorByte;
+        poke: caddr value: 0;
         addr += 1;
+        caddr += 1;
     }
 }
 
