@@ -35,6 +35,8 @@ public sealed class SymbolTable
     // Shared param zone: all methods reuse the same ZP region for params
     private const byte ParamZoneBase = 0x80;
     private byte _paramZoneEnd = ParamZoneBase;
+    // Method locals zone: starts after param zone, reused across methods
+    public byte MethodLocalsBase => _paramZoneEnd;
 
     // --- Zero page allocation ---
 
@@ -239,6 +241,16 @@ public sealed class SymbolTable
 
     public bool TryGetMethodParams(string selectorName, out List<MethodParameter> parameters) =>
         _methodParams.TryGetValue(selectorName, out parameters!);
+
+    /// <summary>
+    /// Prepare ZP for method body locals. Locals start after the param zone
+    /// so they don't overlap with the caller's scene/enter block locals.
+    /// Called before each global method body emission.
+    /// </summary>
+    public void PrepareMethodLocals()
+    {
+        _nextZp = _paramZoneEnd;
+    }
 
     /// <summary>
     /// Allocate shared param zone ZP slots for a method's parameters.
