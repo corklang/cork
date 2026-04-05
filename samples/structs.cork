@@ -1,4 +1,6 @@
 // Phase 4: Structs with fields and methods
+import "../stdlib/screen.cork";
+import "../stdlib/color.cork";
 
 struct Player {
     byte pos = 120;
@@ -10,17 +12,6 @@ struct Player {
 
     moveRight: {
         pos += 1;
-    }
-}
-
-clearScreen: {
-    byte i = 0;
-    while (i < 250) {
-        poke: 0x0400 + i value: 32;
-        poke: 0x04FA + i value: 32;
-        poke: 0x05F4 + i value: 32;
-        poke: 0x06EE + i value: 32;
-        i += 1;
     }
 }
 
@@ -50,7 +41,7 @@ entry scene Game {
         poke: 0x0400 + player.pos value: 81;
 
         // Border shows the struct field
-        poke: 0xD020 value: player.color;
+        setBorderColor: player.color;
     }
 
 }

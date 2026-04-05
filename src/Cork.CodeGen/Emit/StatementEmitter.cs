@@ -400,16 +400,28 @@ public sealed class StatementEmitter(EmitContext ctx)
             return;
         }
 
-        // Byte variable added to word: widen to 16-bit (lo = var, hi = 0)
+        // Byte variable added to word: widen to 16-bit (lo = var, hi = 0 or sign-extended)
         if (value is IdentifierExpr byteVar && !ctx.Symbols.IsWordVar(byteVar.Name) &&
             ctx.Symbols.TryGetLocal(byteVar.Name, out var byteZp) &&
             op is TokenKind.PlusEqual or TokenKind.MinusEqual or TokenKind.Equal)
         {
+            var isSigned = ctx.Symbols.GetVarType(byteVar.Name) is "sbyte";
+
             if (op == TokenKind.Equal)
             {
                 ctx.Buffer.EmitLdaZeroPage(byteZp);
                 ctx.Buffer.EmitStaZeroPage(zpLo);
-                ctx.Buffer.EmitLdaImmediate(0);
+                if (isSigned)
+                {
+                    // Sign-extend: ORA #$7F preserves bit 7; BMI skips LDA #0
+                    ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(0x7F); // ORA #$7F
+                    ctx.Buffer.EmitBmi(2); // BMI +2 (skip LDA #0)
+                    ctx.Buffer.EmitLdaImmediate(0);
+                }
+                else
+                {
+                    ctx.Buffer.EmitLdaImmediate(0);
+                }
                 ctx.Buffer.EmitStaZeroPage(zpHi);
             }
             else if (op == TokenKind.PlusEqual)
@@ -418,8 +430,20 @@ public sealed class StatementEmitter(EmitContext ctx)
                 ctx.Buffer.EmitClc();
                 ctx.Buffer.EmitAdcZeroPage(byteZp);
                 ctx.Buffer.EmitStaZeroPage(zpLo);
-                ctx.Buffer.EmitLdaZeroPage(zpHi);
-                ctx.Buffer.EmitAdcImmediate(0); // carry only
+                if (isSigned)
+                {
+                    // Sign-extend byteZp for high byte add (carry preserved through LDA/ORA/BMI)
+                    ctx.Buffer.EmitLdaZeroPage(byteZp);
+                    ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(0x7F); // ORA #$7F
+                    ctx.Buffer.EmitBmi(2); // BMI +2 (skip LDA #0)
+                    ctx.Buffer.EmitLdaImmediate(0);
+                    ctx.Buffer.EmitAdcZeroPage(zpHi); // sign_ext + hi + carry
+                }
+                else
+                {
+                    ctx.Buffer.EmitLdaZeroPage(zpHi);
+                    ctx.Buffer.EmitAdcImmediate(0); // carry only
+                }
                 ctx.Buffer.EmitStaZeroPage(zpHi);
             }
             else // MinusEqual
@@ -428,8 +452,22 @@ public sealed class StatementEmitter(EmitContext ctx)
                 ctx.Buffer.EmitSec();
                 ctx.Buffer.EmitSbcZeroPage(byteZp);
                 ctx.Buffer.EmitStaZeroPage(zpLo);
-                ctx.Buffer.EmitLdaZeroPage(zpHi);
-                ctx.Buffer.EmitSbcImmediate(0); // borrow only
+                if (isSigned)
+                {
+                    // Sign-extend byteZp for high byte sub (carry/borrow preserved)
+                    ctx.Buffer.EmitLdaZeroPage(byteZp);
+                    ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(0x7F); // ORA #$7F
+                    ctx.Buffer.EmitBmi(2); // BMI +2 (skip LDA #0)
+                    ctx.Buffer.EmitLdaImmediate(0);
+                    ctx.Buffer.EmitStaZeroPage(EmitContext.ZpTemp);
+                    ctx.Buffer.EmitLdaZeroPage(zpHi);
+                    ctx.Buffer.EmitSbcZeroPage(EmitContext.ZpTemp);
+                }
+                else
+                {
+                    ctx.Buffer.EmitLdaZeroPage(zpHi);
+                    ctx.Buffer.EmitSbcImmediate(0); // borrow only
+                }
                 ctx.Buffer.EmitStaZeroPage(zpHi);
             }
             return;

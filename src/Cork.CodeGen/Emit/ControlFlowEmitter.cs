@@ -345,19 +345,34 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             return;
         }
 
-        if (condition is BinaryExpr wordBin &&
-            wordBin.Left is IdentifierExpr wordIdent &&
-            ctx.Symbols.IsWordVar(wordIdent.Name))
+        if (condition is BinaryExpr wordBin)
         {
-            // Word vs word variable comparison
-            if (wordBin.Right is IdentifierExpr wordRight && ctx.Symbols.IsWordVar(wordRight.Name))
+            // Resolve left side to a word variable name (plain identifiers and struct/sprite fields)
+            string? wordVarName = null;
+            if (wordBin.Left is IdentifierExpr wordIdent && ctx.Symbols.IsWordVar(wordIdent.Name))
             {
-                EmitWordVarComparisonBranchTrue(wordIdent.Name, wordBin.Op, wordRight.Name, skipBytes);
+                wordVarName = wordIdent.Name;
+            }
+            else if (wordBin.Left is MemberAccessExpr memberLeft &&
+                     memberLeft.Receiver is IdentifierExpr recvIdent &&
+                     ctx.Expressions.TryResolveStructField(memberLeft, out var memberZp) &&
+                     ctx.Symbols.GetVarTypeForZp(memberZp) is { } ft && SymbolTable.Is16BitType(ft))
+            {
+                wordVarName = $"{recvIdent.Name}${memberLeft.MemberName}";
+            }
+
+            if (wordVarName != null)
+            {
+                // Word vs word variable comparison
+                if (wordBin.Right is IdentifierExpr wordRight && ctx.Symbols.IsWordVar(wordRight.Name))
+                {
+                    EmitWordVarComparisonBranchTrue(wordVarName, wordBin.Op, wordRight.Name, skipBytes);
+                    return;
+                }
+                var litVal = ExpressionEmitter.Resolve16BitInitializer("", wordBin.Right);
+                EmitWordComparisonBranchTrue(wordVarName, wordBin.Op, litVal, skipBytes);
                 return;
             }
-            var litVal = ExpressionEmitter.Resolve16BitInitializer("", wordBin.Right);
-            EmitWordComparisonBranchTrue(wordIdent.Name, wordBin.Op, litVal, skipBytes);
-            return;
         }
 
         if (condition is BinaryExpr signedBin &&

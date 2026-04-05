@@ -59,14 +59,14 @@ entry scene Demo {
             . . . . . . . . . . . . . . . . . . . . . . . .
             . . . . . . . . . . . . . . . . . . . . . . . .
         `;
-        x: 100;
+        x: 260;
         y: 100;
         color: Color.red;
         expandX: true;
         expandY: true;
     }
 
-    byte enemyDir = 1;
+    sbyte enemyDir = 1;
 
     frame {
         // Move player with joystick — auto-syncs to VIC-II
@@ -77,12 +77,14 @@ entry scene Demo {
 
         // Move enemy
         enemy.x += enemyDir;
-        if (enemy.x > 230) { enemyDir = 255; }
+        if (enemy.x > 300) { enemyDir = -1; }
         if (enemy.x < 30)  { enemyDir = 1; }
 
         // Collision detection (parens needed for message send in condition)
         if ((player collidedWith: enemy)) {
             poke: 0xD020 value: 2;
+        } else {
+            poke: 0xD020 value: 1;
         }
     }
 }

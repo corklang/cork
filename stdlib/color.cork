@@ -1,0 +1,12 @@
+// Cork Standard Library: Color
+// import "../stdlib/color.cork";
+
+// Set border color (0-15)
+setBorderColor: (byte _col) {
+    poke: 0xD020 value: _col;
+}
+
+// Set background color (0-15)
+setBackgroundColor: (byte _col) {
+    poke: 0xD021 value: _col;
+}

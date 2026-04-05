@@ -29,7 +29,7 @@ public class SampleSnapshotTests
         // Compile using the pipeline
         var lexer = new Lexer(source, sourcePath);
         var tokens = lexer.Tokenize();
-        var parser = new Parser(tokens);
+        var parser = new Parser(tokens, Path.GetDirectoryName(sourcePath) ?? ".");
         var program = parser.ParseProgram();
         var codeStart = PrgWriter.CalculateCodeStart();
         var codeGen = new CodeGenerator(codeStart);
