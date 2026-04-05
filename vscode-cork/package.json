@@ -28,6 +28,19 @@
           "light": "./icons/cork-icon.svg",
           "dark": "./icons/cork-icon.svg"
         }
+      },
+      {
+        "id": "prg",
+        "aliases": [
+          "C64 PRG"
+        ],
+        "extensions": [
+          ".prg"
+        ],
+        "icon": {
+          "light": "./icons/prg-icon.svg",
+          "dark": "./icons/prg-icon.svg"
+        }
       }
     ],
     "grammars": [
@@ -101,6 +114,16 @@
       {
         "command": "cork.runInVice",
         "title": "Cork: Run in VICE"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "cork.prgViewer",
+        "displayName": "C64 PRG Viewer",
+        "selector": [
+          { "filenamePattern": "*.prg" }
+        ],
+        "priority": "default"
       }
     ]
   },

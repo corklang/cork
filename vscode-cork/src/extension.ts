@@ -11,6 +11,7 @@ import { CorkDefinitionProvider } from "./definitionProvider";
 import { CorkReferenceProvider } from "./referenceProvider";
 import { CorkRenameProvider } from "./renameProvider";
 import { CorkColorProvider } from "./colorProvider";
+import { PrgViewerProvider } from "./prgViewer";
 
 const CORK_SELECTOR: vscode.DocumentSelector = { language: "cork", scheme: "file" };
 
@@ -76,6 +77,14 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.languages.registerColorProvider(CORK_SELECTOR, new CorkColorProvider())
+  );
+
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      "cork.prgViewer",
+      new PrgViewerProvider(),
+      { supportsMultipleEditorsPerDocument: true }
+    )
   );
 
   registerViceCommands(context);
