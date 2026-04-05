@@ -18,6 +18,8 @@ entry scene Demo {
     byte tick = 0;
 
     enter {
+        // Blank screen during setup to prevent flash of uninitialized bitmap
+        poke: 0xD011 value: 0x0B;  // disable display (DEN=0)
         clearBitmap:;
         setBitmapColors: 1 bg: 0;
 
@@ -62,6 +64,9 @@ entry scene Demo {
             plotPixel: cx2 y: cy2;
             d += 1;
         }
+
+        // Re-enable display now that bitmap is fully drawn
+        poke: 0xD011 value: 0x3B;  // bitmap mode with DEN=1
     }
 
     frame {
