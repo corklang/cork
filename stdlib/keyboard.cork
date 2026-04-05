@@ -10,32 +10,61 @@
 //   ctrl, commodore, runStop, plus/minus/star/slash/equals,
 //   period/comma/colon/semicolon/at/pound, leftArrow/upArrow
 //
-// KERNAL buffer functions below for text input scenarios.
+// Functions below scan the matrix directly (no KERNAL IRQ needed).
 
-// PETSCII key codes for use with getKey:/waitForKey:
+// Column select values for CIA1 $DC00 (active low)
+const byte[8] _kbdCols = { 0xFE, 0xFD, 0xFB, 0xF7, 0xEF, 0xDF, 0xBF, 0x7F };
+
+// Matrix position → PETSCII code (0 = modifier key, skip)
+const byte[64] _kbdPetscii = {
+    20, 51, 53, 55, 57, 43, 92, 49,
+    13, 87, 82, 89, 73, 80, 42, 95,
+    29, 65, 68, 71, 74, 76, 59,  0,
+   136, 52, 54, 56, 48, 45, 19, 50,
+   133, 90, 67, 66, 77, 46,  0, 32,
+   134, 83, 70, 72, 75, 58, 61,  0,
+   135, 69, 84, 85, 79, 64, 94, 81,
+    17,  0, 88, 86, 78, 44, 47,  3
+};
+
+// PETSCII key codes for comparisons
 const byte KEY_RETURN = 13;
 const byte KEY_SPACE = 32;
 const byte KEY_DEL = 20;
 const byte KEY_HOME = 19;
 const byte KEY_CURSOR_DOWN = 17;
-const byte KEY_CURSOR_UP = 145;
 const byte KEY_CURSOR_RIGHT = 29;
-const byte KEY_CURSOR_LEFT = 157;
 const byte KEY_F1 = 133;
 const byte KEY_F3 = 134;
 const byte KEY_F5 = 135;
 const byte KEY_F7 = 136;
 const byte KEY_RUN_STOP = 3;
 
-// Read a key from the KERNAL keyboard buffer.
-// Returns the PETSCII code of the key, or 0 if no key was pressed.
-// The buffer is cleared after reading.
+// Scan the keyboard matrix and return the PETSCII code of the
+// first pressed key, or 0 if no key is pressed.
+// Scans CIA1 directly — works regardless of SEI/CLI state.
 byte getKey: {
-    byte _count = (peek: 198);
-    if (_count == 0) { return 0; }
-    byte _key = (peek: 631);
-    poke: 198 value: 0;
-    return _key;
+    byte _col = 0;
+    while (_col < 8) {
+        poke: 0xDC00 value: _kbdCols[_col];
+        byte _rows = (peek: 0xDC01);
+        if (_rows != 0xFF) {
+            byte _row = 0;
+            byte _mask = 1;
+            while (_row < 8) {
+                if ((_rows & _mask) == 0) {
+                    byte _code = _kbdPetscii[_col * 8 + _row];
+                    poke: 0xDC00 value: 0xFF;
+                    if (_code != 0) { return _code; }
+                }
+                _mask <<= 1;
+                _row += 1;
+            }
+        }
+        _col += 1;
+    }
+    poke: 0xDC00 value: 0xFF;
+    return 0;
 }
 
 // Wait until a key is pressed and return its PETSCII code.
@@ -48,7 +77,6 @@ byte waitForKey: {
 }
 
 // Check if any key is currently pressed (direct scan).
-// Selects all columns and reads rows — any 0 bit means a key is down.
 byte anyKeyPressed: {
     poke: 0xDC00 value: 0;
     byte _rows = (peek: 0xDC01);

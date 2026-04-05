@@ -1,4 +1,4 @@
-// Feature: keyboard input — direct scanning and KERNAL buffer
+// Feature: keyboard input — direct scanning and matrix-based getKey
 
 import "../stdlib/keyboard.cork";
 import "../stdlib/screen.cork";
@@ -20,7 +20,7 @@ entry scene Demo {
     }
 
     frame {
-        // Direct key scanning — instant response, no KERNAL buffer
+        // Direct key scanning — instant response
         if (keyboard.w) { if (posY > 1)  { posY -= 1; } }
         if (keyboard.s) { if (posY < 23) { posY += 1; } }
         if (keyboard.a) { if (posX > 0)  { posX -= 1; } }
@@ -58,12 +58,12 @@ scene TypeDemo {
     }
 
     frame {
-        // KERNAL buffer reading — returns PETSCII codes
+        // Direct scan for back button (always responsive)
+        if (keyboard.f1) { go Demo; }
+
+        // Matrix-scanned getKey for text input (no KERNAL needed)
         byte key = (getKey:);
         if (key != 0) {
-            if (key == KEY_F1) { go Demo; }
-
-            // Display typed characters on screen
             poke: 0x0400 + pos value: key;
             pos += 1;
             if (pos > 199) { pos = 80; }
