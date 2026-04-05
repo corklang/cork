@@ -321,6 +321,41 @@ public sealed class StatementEmitter(EmitContext ctx)
             return;
         }
 
+        // Byte variable added to word: widen to 16-bit (lo = var, hi = 0)
+        if (value is IdentifierExpr byteVar && !ctx.Symbols.IsWordVar(byteVar.Name) &&
+            ctx.Symbols.TryGetLocal(byteVar.Name, out var byteZp) &&
+            op is TokenKind.PlusEqual or TokenKind.MinusEqual or TokenKind.Equal)
+        {
+            if (op == TokenKind.Equal)
+            {
+                ctx.Buffer.EmitLdaZeroPage(byteZp);
+                ctx.Buffer.EmitStaZeroPage(zpLo);
+                ctx.Buffer.EmitLdaImmediate(0);
+                ctx.Buffer.EmitStaZeroPage(zpHi);
+            }
+            else if (op == TokenKind.PlusEqual)
+            {
+                ctx.Buffer.EmitLdaZeroPage(zpLo);
+                ctx.Buffer.EmitClc();
+                ctx.Buffer.EmitAdcZeroPage(byteZp);
+                ctx.Buffer.EmitStaZeroPage(zpLo);
+                ctx.Buffer.EmitLdaZeroPage(zpHi);
+                ctx.Buffer.EmitAdcImmediate(0); // carry only
+                ctx.Buffer.EmitStaZeroPage(zpHi);
+            }
+            else // MinusEqual
+            {
+                ctx.Buffer.EmitLdaZeroPage(zpLo);
+                ctx.Buffer.EmitSec();
+                ctx.Buffer.EmitSbcZeroPage(byteZp);
+                ctx.Buffer.EmitStaZeroPage(zpLo);
+                ctx.Buffer.EmitLdaZeroPage(zpHi);
+                ctx.Buffer.EmitSbcImmediate(0); // borrow only
+                ctx.Buffer.EmitStaZeroPage(zpHi);
+            }
+            return;
+        }
+
         var val = ExpressionEmitter.Resolve16BitInitializer("", value);
 
         if (op == TokenKind.Equal)

@@ -10,23 +10,37 @@ entry scene Test {
 
     enter {
         clearBitmap:;
-        setBitmapColors: Color.white bg: Color.black;
+        setBitmapColors: Color.green bg: Color.black;
 
-        // Diagonal line of individual pixels
+        // Individual pixels at known positions
+        plotPixel: 160 y: 100;
+        plotPixel: 161 y: 100;
+        plotPixel: 162 y: 100;
+        plotPixel: 163 y: 100;
+        plotPixel: 160 y: 101;
+        plotPixel: 160 y: 102;
+        plotPixel: 160 y: 103;
+
+        // Diagonal line
         byte i = 0;
-        while (i < 100) {
-            word px = 10;
-            px += i * 3;
-            byte py = 10 + i;
-            plotPixel: px y: py;
+        while (i < 40) {
+            word px = 40;
+            px += i * 2;
+            plotPixel: px y: 40 + i;
             i += 1;
         }
 
-        // Small rectangle
-        bitmapRect: 200 y1: 20 x2: 280 y2: 80;
+        // Another diagonal
+        i = 0;
+        while (i < 40) {
+            word px = 200;
+            px += i * 2;
+            plotPixel: px y: 140 - i;
+            i += 1;
+        }
 
-        // Short horizontal line
-        bitmapHLine: 150 from: 50 to: 150;
+        // Short h-line (just 20 pixels)
+        bitmapHLine: 10 from: 10 to: 30;
     }
 
     frame { }
