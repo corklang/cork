@@ -28,16 +28,8 @@ entry scene Demo {
     word cursorColor = 0;
 
     computeCursor: {
-        // posY * 40 overflows a byte (12*40=480), so use word += 40 in a loop
-        cursorScreen = 0x0400;
-        cursorScreen += posX;
-        byte _r = 0;
-        while (_r < posY) { cursorScreen += 40; _r += 1; }
-
-        cursorColor = 0xD800;
-        cursorColor += posX;
-        _r = 0;
-        while (_r < posY) { cursorColor += 40; _r += 1; }
+        cursorScreen = (posY as word) * 40 + posX + 0x0400;
+        cursorColor = (posY as word) * 40 + posX + 0xD800;
     }
 
     enter {

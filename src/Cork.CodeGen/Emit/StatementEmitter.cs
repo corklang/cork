@@ -435,6 +435,16 @@ public sealed class StatementEmitter(EmitContext ctx)
             return;
         }
 
+        // Binary expression on a word assignment: decompose into init + compound-assign
+        // e.g. screenPos = (posY as word) * 40 → set screenPos = posY, then screenPos *= 40
+        if (op == TokenKind.Equal && value is BinaryExpr binVal &&
+            TryMapToCompoundOp(binVal.Op, out var innerOp))
+        {
+            EmitWordAssignment(zpLo, TokenKind.Equal, binVal.Left);
+            EmitWordAssignment(zpLo, innerOp, binVal.Right);
+            return;
+        }
+
         // Try to resolve as 16-bit literal; if not, evaluate as byte expression
         var isLiteral = value is IntLiteralExpr or FixedLiteralExpr or UnaryExpr;
         if (!isLiteral && ctx.Expressions.TryFoldConstant(value, out _))
