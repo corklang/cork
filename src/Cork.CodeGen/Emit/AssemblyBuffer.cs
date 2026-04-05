@@ -85,21 +85,21 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     }
 
     public void EmitLdaAbsolute(ushort addr) { EmitByte(0xAD); EmitWord(addr); ResetPeephole(); }
-    public void EmitLdaAbsoluteX(ushort addr) { EmitByte(0xBD); EmitWord(addr); }
-    public void EmitLdaAbsoluteY(ushort addr) { EmitByte(0xB9); EmitWord(addr); }
+    public void EmitLdaAbsoluteX(ushort addr) { EmitByte(0xBD); EmitWord(addr); ResetPeephole(); }
+    public void EmitLdaAbsoluteY(ushort addr) { EmitByte(0xB9); EmitWord(addr); ResetPeephole(); }
 
     // LDA indirect indexed
-    public void EmitLdaIndirectY(byte zpAddr) { EmitByte(0xB1); EmitByte(zpAddr); }
+    public void EmitLdaIndirectY(byte zpAddr) { EmitByte(0xB1); EmitByte(zpAddr); ResetPeephole(); }
 
     // LDY zero page
-    public void EmitLdyZeroPage(byte addr) { EmitByte(0xA4); EmitByte(addr); }
+    public void EmitLdyZeroPage(byte addr) { EmitByte(0xA4); EmitByte(addr); ResetPeephole(); }
 
-    // LDX
-    public void EmitLdxImmediate(byte value) { EmitByte(0xA2); EmitByte(value); }
-    public void EmitLdxZeroPage(byte addr) { EmitByte(0xA6); EmitByte(addr); }
+    // LDX — changes X, reset peephole
+    public void EmitLdxImmediate(byte value) { EmitByte(0xA2); EmitByte(value); ResetPeephole(); }
+    public void EmitLdxZeroPage(byte addr) { EmitByte(0xA6); EmitByte(addr); ResetPeephole(); }
 
     // LDY
-    public void EmitLdyImmediate(byte value) { EmitByte(0xA0); EmitByte(value); }
+    public void EmitLdyImmediate(byte value) { EmitByte(0xA0); EmitByte(value); ResetPeephole(); }
 
     // STA
     public void EmitStaZeroPage(byte addr)
@@ -112,7 +112,7 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     public void EmitStaIndirectY(byte zpAddr) { EmitByte(0x91); EmitByte(zpAddr); ResetPeephole(); }
 
     // STX
-    public void EmitStxZeroPage(byte addr) { EmitByte(0x86); EmitByte(addr); }
+    public void EmitStxZeroPage(byte addr) { EmitByte(0x86); EmitByte(addr); ResetPeephole(); }
 
     // Arithmetic — all change A, reset peephole
     public void EmitClc() { EmitByte(0x18); /* don't reset — flag only */ }
@@ -123,24 +123,24 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     public void EmitSbcImmediate(byte value) { EmitByte(0xE9); EmitByte(value); ResetPeephole(); }
     public void EmitSbcZeroPage(byte addr) { EmitByte(0xE5); EmitByte(addr); ResetPeephole(); }
 
-    // Increment / Decrement
-    public void EmitInx() => EmitByte(0xE8);
-    public void EmitIny() => EmitByte(0xC8);
-    public void EmitDex() => EmitByte(0xCA);
-    public void EmitDey() => EmitByte(0x88);
-    public void EmitIncZeroPage(byte addr) { EmitByte(0xE6); EmitByte(addr); }
-    public void EmitDecZeroPage(byte addr) { EmitByte(0xC6); EmitByte(addr); }
+    // Increment / Decrement — all reset peephole
+    public void EmitInx() { EmitByte(0xE8); ResetPeephole(); }
+    public void EmitIny() { EmitByte(0xC8); ResetPeephole(); }
+    public void EmitDex() { EmitByte(0xCA); ResetPeephole(); }
+    public void EmitDey() { EmitByte(0x88); ResetPeephole(); }
+    public void EmitIncZeroPage(byte addr) { EmitByte(0xE6); EmitByte(addr); ResetPeephole(); }
+    public void EmitDecZeroPage(byte addr) { EmitByte(0xC6); EmitByte(addr); ResetPeephole(); }
 
-    // Shift
-    public void EmitLsrZeroPage(byte addr) { EmitByte(0x46); EmitByte(addr); }
-    public void EmitRorZeroPage(byte addr) { EmitByte(0x66); EmitByte(addr); }
-    public void EmitAslZeroPage(byte addr) { EmitByte(0x06); EmitByte(addr); }
-    public void EmitRolZeroPage(byte addr) { EmitByte(0x26); EmitByte(addr); }
+    // Shift — all reset peephole
+    public void EmitLsrZeroPage(byte addr) { EmitByte(0x46); EmitByte(addr); ResetPeephole(); }
+    public void EmitRorZeroPage(byte addr) { EmitByte(0x66); EmitByte(addr); ResetPeephole(); }
+    public void EmitAslZeroPage(byte addr) { EmitByte(0x06); EmitByte(addr); ResetPeephole(); }
+    public void EmitRolZeroPage(byte addr) { EmitByte(0x26); EmitByte(addr); ResetPeephole(); }
 
-    // Compare
-    public void EmitCmpImmediate(byte value) { EmitByte(0xC9); EmitByte(value); }
-    public void EmitCmpZeroPage(byte addr) { EmitByte(0xC5); EmitByte(addr); }
-    public void EmitCpxImmediate(byte value) { EmitByte(0xE0); EmitByte(value); }
+    // Compare — all reset peephole
+    public void EmitCmpImmediate(byte value) { EmitByte(0xC9); EmitByte(value); ResetPeephole(); }
+    public void EmitCmpZeroPage(byte addr) { EmitByte(0xC5); EmitByte(addr); ResetPeephole(); }
+    public void EmitCpxImmediate(byte value) { EmitByte(0xE0); EmitByte(value); ResetPeephole(); }
 
     // Branch — all reset peephole (control flow change)
     public void EmitBne(sbyte offset) { EmitByte(0xD0); EmitByte((byte)offset); ResetPeephole(); }
@@ -166,9 +166,9 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     public void EmitPla() { EmitByte(0x68); ResetPeephole(); }
 
     // Misc
-    public void EmitNop() => EmitByte(0xEA);
-    public void EmitSei() => EmitByte(0x78);
-    public void EmitCli() => EmitByte(0x58);
+    public void EmitNop() { EmitByte(0xEA); ResetPeephole(); }
+    public void EmitSei() { EmitByte(0x78); ResetPeephole(); }
+    public void EmitCli() { EmitByte(0x58); ResetPeephole(); }
 
     // --- Fixup / Label resolution ---
 
