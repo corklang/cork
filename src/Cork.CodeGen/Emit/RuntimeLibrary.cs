@@ -439,7 +439,7 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         ctx.Buffer.EmitByte(0x08); // PHP — save set/clear flag
 
         // charRow = y >> 3
-        ctx.Buffer.EmitLdaZeroPage(0x0F);
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpTemp);
         ctx.Buffer.EmitByte(0x4A); // LSR A
         ctx.Buffer.EmitByte(0x4A); // LSR A
         ctx.Buffer.EmitByte(0x4A); // LSR A → charRow (0-24)
@@ -462,7 +462,7 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
 
         // pixelRow = y & 7 → Y register
-        ctx.Buffer.EmitLdaZeroPage(0x0F);
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpTemp);
         ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(0x07); // AND #$07
         ctx.Buffer.EmitTay();
 

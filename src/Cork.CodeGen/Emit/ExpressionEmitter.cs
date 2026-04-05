@@ -294,10 +294,10 @@ public sealed class ExpressionEmitter(EmitContext ctx)
             // Complex operand: evaluate to temp, apply op
             ctx.Buffer.EmitPha();
             EmitExprToA(operand);
-            ctx.Buffer.EmitStaZeroPage(0x0F);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpTemp);
             ctx.Buffer.EmitPla();
             ctx.Buffer.EmitByte(zpOpcode);
-            ctx.Buffer.EmitByte(0x0F);
+            ctx.Buffer.EmitByte(EmitContext.ZpTemp);
         }
     }
 
@@ -312,9 +312,9 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 // Complex operand: save A, evaluate operand, store to temp, restore A, ADC temp
                 ctx.Buffer.EmitPha();
                 EmitExprToA(expr);
-                ctx.Buffer.EmitStaZeroPage(0x0F); // temp
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpTemp); // temp
                 ctx.Buffer.EmitPla();
-                ctx.Buffer.EmitAdcZeroPage(0x0F);
+                ctx.Buffer.EmitAdcZeroPage(EmitContext.ZpTemp);
                 break;
         }
     }
@@ -329,9 +329,9 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 // Complex operand: save A, evaluate operand, store to temp, restore A, SBC temp
                 ctx.Buffer.EmitPha();
                 EmitExprToA(expr);
-                ctx.Buffer.EmitStaZeroPage(0x0F);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpTemp);
                 ctx.Buffer.EmitPla();
-                ctx.Buffer.EmitSbcZeroPage(0x0F);
+                ctx.Buffer.EmitSbcZeroPage(EmitContext.ZpTemp);
                 break;
         }
     }

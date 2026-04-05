@@ -451,7 +451,7 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
     {
         // Evaluate y (byte) → $0F
         ctx.Expressions.EmitExprToA(yExpr);
-        ctx.Buffer.EmitStaZeroPage(0x0F);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpTemp);
 
         // Evaluate x → $F0/$F1
         if (xExpr is IdentifierExpr xIdent && ctx.Symbols.IsWordVar(xIdent.Name))

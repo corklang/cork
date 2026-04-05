@@ -191,12 +191,12 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
         var endLabel = ctx.NextLabel("swend");
 
         ctx.Expressions.EmitExprToA(stmt.Subject);
-        ctx.Buffer.EmitStaZeroPage(0x0F);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpTemp);
 
         for (var i = 0; i < stmt.Cases.Count; i++)
         {
             var caseValue = ctx.Expressions.EvalConstExpr(stmt.Cases[i].Value);
-            ctx.Buffer.EmitLdaZeroPage(0x0F);
+            ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpTemp);
             ctx.Buffer.EmitCmpImmediate(caseValue);
             ctx.Buffer.EmitBne(3);
             ctx.Buffer.EmitJmpForward($"swcase_{endLabel}_{i}");
@@ -399,9 +399,9 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             {
                 ctx.Buffer.EmitPha();
                 ctx.Expressions.EmitExprToA(bin.Right);
-                ctx.Buffer.EmitStaZeroPage(0x0F);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpTemp);
                 ctx.Buffer.EmitPla();
-                ctx.Buffer.EmitCmpZeroPage(0x0F);
+                ctx.Buffer.EmitCmpZeroPage(EmitContext.ZpTemp);
             }
 
             switch (bin.Op)

@@ -473,10 +473,10 @@ public sealed class StatementEmitter(EmitContext ctx)
             else // MinusEqual
             {
                 ctx.Expressions.EmitExprToA(value);
-                ctx.Buffer.EmitStaZeroPage(0x0F); // temp
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpTemp); // temp
                 ctx.Buffer.EmitLdaZeroPage(zpLo);
                 ctx.Buffer.EmitSec();
-                ctx.Buffer.EmitSbcZeroPage(0x0F);
+                ctx.Buffer.EmitSbcZeroPage(EmitContext.ZpTemp);
                 ctx.Buffer.EmitStaZeroPage(zpLo);
                 ctx.Buffer.EmitLdaZeroPage(zpHi);
                 ctx.Buffer.EmitSbcImmediate(0);

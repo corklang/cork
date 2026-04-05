@@ -65,8 +65,6 @@ entry scene Demo {
             d += 1;
         }
 
-        // Re-fill screen RAM (drawing corrupts a couple of cells — root cause TBD)
-        setBitmapColors: 1 bg: 0;
         // Re-enable display now that bitmap is fully drawn
         poke: 0xD011 value: 0x3B;  // bitmap mode with DEN=1
     }

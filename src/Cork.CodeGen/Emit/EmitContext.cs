@@ -16,6 +16,7 @@ public sealed class EmitContext
     private int _labelCounter;
 
     // ZP constants for runtime routines
+    public const byte ZpTemp = 0xED;      // scratch byte (was 0x0F — must not be in allocatable range)
     public const byte ZpPointerLo = 0xFB;
     public const byte ZpPointerHi = 0xFC;
     public const byte ZpMulA = 0xF0;
