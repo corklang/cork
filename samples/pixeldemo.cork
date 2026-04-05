@@ -1,0 +1,102 @@
+// Feature: fast plotPixel intrinsic — real-time bitmap drawing
+// Draws 6400+ pixels in the enter block (< 1 second).
+// Old Cork method plotPixel: this would take ~16 seconds.
+
+import "../stdlib/bitmap.cork";
+
+entry scene Demo {
+    hardware {
+        border: Color.black;
+        background: Color.black;
+        mode: bitmap;
+    }
+
+    word ballX = 160;
+    byte ballY = 100;
+    byte dx = 2;
+    byte dy = 1;
+    byte tick = 0;
+
+    enter {
+        clearBitmap:;
+        setBitmapColors: 1 bg: 0;
+
+        // Draw border frame (320+320+200+200 = 1040 pixels)
+        bitmapHLine: 0 from: 0 to: 319;
+        bitmapHLine: 199 from: 0 to: 319;
+        bitmapVLine: 0 from: 0 to: 199;
+        bitmapVLine: 319 from: 0 to: 199;
+
+        // Draw grid (20 horizontal lines × 320 + 16 vertical × 200 = 9600 pixels)
+        byte row = 10;
+        while (row < 200) {
+            bitmapHLine: row from: 1 to: 318;
+            row += 10;
+        }
+        word col = 20;
+        while (col < 320) {
+            bitmapVLine: col from: 1 to: 198;
+            col += 20;
+        }
+
+        // Draw diagonal cross (400 pixels)
+        byte i = 0;
+        while (i < 200) {
+            word px = (i as word) + 60;
+            plotPixel: px y: i;
+            word px2 = 259 - i;
+            plotPixel: px2 y: i;
+            i += 1;
+        }
+
+        // Draw diamond in center
+        byte d = 0;
+        while (d < 50) {
+            word cx = 160 + d;
+            word cx2 = 160 - d;
+            byte cy1 = 100 - 50 + d;
+            byte cy2 = 100 + 50 - d;
+            plotPixel: cx y: cy1;
+            plotPixel: cx2 y: cy1;
+            plotPixel: cx y: cy2;
+            plotPixel: cx2 y: cy2;
+            d += 1;
+        }
+    }
+
+    frame {
+        // Erase old ball (3x3 block)
+        clearPixel: ballX y: ballY;
+        word bx1 = ballX + 1;
+        clearPixel: bx1 y: ballY;
+        word bx0 = ballX - 1;
+        clearPixel: bx0 y: ballY;
+        byte by1 = ballY + 1;
+        clearPixel: ballX y: by1;
+        byte by0 = ballY - 1;
+        clearPixel: ballX y: by0;
+
+        // Move ball
+        ballX += dx;
+        ballY += dy;
+        if (ballX > 310) { dx = 254; }
+        if (ballX < 10)  { dx = 2; }
+        if (ballY > 190) { dy = 255; }
+        if (ballY < 10)  { dy = 1; }
+
+        // Draw new ball (3x3 cross)
+        plotPixel: ballX y: ballY;
+        bx1 = ballX + 1;
+        plotPixel: bx1 y: ballY;
+        bx0 = ballX - 1;
+        plotPixel: bx0 y: ballY;
+        by1 = ballY + 1;
+        plotPixel: ballX y: by1;
+        by0 = ballY - 1;
+        plotPixel: ballX y: by0;
+
+        // Cycle border color every 4 frames for flair
+        tick += 1;
+        poke: 0xD020 value: tick >> 2;
+    }
+}
