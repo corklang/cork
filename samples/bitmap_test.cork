@@ -1,0 +1,33 @@
+// Test: bitmap plotting stdlib
+import "../stdlib/bitmap.cork";
+
+entry scene Test {
+    hardware {
+        mode: bitmap;
+        border: Color.black;
+        background: Color.black;
+    }
+
+    enter {
+        clearBitmap:;
+        setBitmapColors: Color.white bg: Color.black;
+
+        // Diagonal line of individual pixels
+        byte i = 0;
+        while (i < 100) {
+            word px = 10;
+            px += i * 3;
+            byte py = 10 + i;
+            plotPixel: px y: py;
+            i += 1;
+        }
+
+        // Small rectangle
+        bitmapRect: 200 y1: 20 x2: 280 y2: 80;
+
+        // Short horizontal line
+        bitmapHLine: 150 from: 50 to: 150;
+    }
+
+    frame { }
+}

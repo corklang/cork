@@ -242,6 +242,35 @@ public sealed class StatementEmitter(EmitContext ctx)
                 ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpDivRemainder);
                 ctx.Buffer.EmitStaZeroPage(zp); // remainder
                 break;
+            case TokenKind.AmpEqual:
+                ctx.Buffer.EmitLdaZeroPage(zp);
+                ctx.Expressions.EmitBitwiseOp(0x29, 0x25, assign.Value);
+                ctx.Buffer.EmitStaZeroPage(zp);
+                break;
+            case TokenKind.PipeEqual:
+                ctx.Buffer.EmitLdaZeroPage(zp);
+                ctx.Expressions.EmitBitwiseOp(0x09, 0x05, assign.Value);
+                ctx.Buffer.EmitStaZeroPage(zp);
+                break;
+            case TokenKind.CaretEqual:
+                ctx.Buffer.EmitLdaZeroPage(zp);
+                ctx.Expressions.EmitBitwiseOp(0x49, 0x45, assign.Value);
+                ctx.Buffer.EmitStaZeroPage(zp);
+                break;
+            case TokenKind.ShiftLeftEqual:
+                if (assign.Value is IntLiteralExpr shlLit)
+                    for (var s = 0; s < (int)shlLit.Value; s++)
+                        ctx.Buffer.EmitAslZeroPage(zp);
+                else
+                    throw new CompileError("Shift count must be constant", assign.Value.Location);
+                break;
+            case TokenKind.ShiftRightEqual:
+                if (assign.Value is IntLiteralExpr shrLit)
+                    for (var s = 0; s < (int)shrLit.Value; s++)
+                        ctx.Buffer.EmitLsrZeroPage(zp);
+                else
+                    throw new CompileError("Shift count must be constant", assign.Value.Location);
+                break;
             default:
                 throw new CompileError($"Unsupported assignment operator: {assign.Op}", assign.Target.Location);
         }

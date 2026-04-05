@@ -259,7 +259,7 @@ public sealed class ExpressionEmitter(EmitContext ctx)
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpDivRemainder);
     }
 
-    private void EmitBitwiseOp(byte immOpcode, byte zpOpcode, ExprNode operand)
+    public void EmitBitwiseOp(byte immOpcode, byte zpOpcode, ExprNode operand)
     {
         if (TryFoldConstant(operand, out var constVal))
         {

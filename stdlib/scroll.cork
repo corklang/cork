@@ -1,0 +1,151 @@
+// Cork Standard Library: Smooth Scrolling
+// import "../stdlib/scroll.cork";
+//
+// Provides fine scroll control and screen shifting for text modes.
+// Hardware scroll uses $D016 bits 0-2 (X) and $D011 bits 0-2 (Y).
+// Range: 0-7 pixels. When scroll wraps, shift screen RAM by one char.
+//
+// Usage pattern in frame loop:
+//   scrollX -= 1;
+//   if (scrollX > 7) {    // wrapped below 0 (unsigned: 255)
+//       scrollX = 7;
+//       shiftScreenLeft:;
+//       // fill rightmost column with new content
+//   }
+//   setScrollX: scrollX;
+
+// Set horizontal fine scroll (0-7)
+setScrollX: (byte scroll) {
+    // Read $D016, preserve bits 3-7, replace bits 0-2
+    byte reg = (peek: 0xD016);
+    reg &= 0xF8;
+    reg |= (scroll & 0x07);
+    poke: 0xD016 value: reg;
+}
+
+// Set vertical fine scroll (0-7)
+setScrollY: (byte scroll) {
+    // Read $D011, preserve bits 3-7, replace bits 0-2
+    byte reg = (peek: 0xD011);
+    reg &= 0xF8;
+    reg |= (scroll & 0x07);
+    poke: 0xD011 value: reg;
+}
+
+// Shift screen RAM left by one character (40 bytes per row)
+// Copies each row's bytes one position left, clears rightmost column.
+shiftScreenLeft: {
+    word src = 0x0401;
+    word dst = 0x0400;
+    word csrc = 0xD801;
+    word cdst = 0xD800;
+    byte row = 0;
+    while (row < 25) {
+        byte col = 0;
+        while (col < 39) {
+            poke: dst value: (peek: src);
+            poke: cdst value: (peek: csrc);
+            src += 1;
+            dst += 1;
+            csrc += 1;
+            cdst += 1;
+            col += 1;
+        }
+        // Skip the last byte (it was the rightmost, now overwritten)
+        // Move to next row — src is already at start of next row
+        src += 1;
+        dst += 1;
+        csrc += 1;
+        cdst += 1;
+        row += 1;
+    }
+    // Clear rightmost column
+    word addr = 0x0427;
+    byte r = 0;
+    while (r < 25) {
+        poke: addr value: 32;
+        addr += 40;
+        r += 1;
+    }
+}
+
+// Shift screen RAM right by one character
+shiftScreenRight: {
+    // Work backwards to avoid overwriting
+    word src = 0x07E6;
+    word dst = 0x07E7;
+    word csrc = 0xDBE6;
+    word cdst = 0xDBE7;
+    byte row = 0;
+    while (row < 25) {
+        byte col = 0;
+        while (col < 39) {
+            poke: dst value: (peek: src);
+            poke: cdst value: (peek: csrc);
+            src -= 1;
+            dst -= 1;
+            csrc -= 1;
+            cdst -= 1;
+            col += 1;
+        }
+        src -= 1;
+        dst -= 1;
+        csrc -= 1;
+        cdst -= 1;
+        row += 1;
+    }
+    // Clear leftmost column
+    word addr = 0x0400;
+    byte r = 0;
+    while (r < 25) {
+        poke: addr value: 32;
+        addr += 40;
+        r += 1;
+    }
+}
+
+// Shift screen RAM up by one row (reuses scrollUp from screen.cork concept)
+shiftScreenUp: {
+    word src = 0x0428;
+    word dst = 0x0400;
+    word csrc = 0xD828;
+    word cdst = 0xD800;
+    word limit = 0x07E8;
+    while (dst < limit) {
+        poke: dst value: (peek: src);
+        poke: cdst value: (peek: csrc);
+        src += 1;
+        dst += 1;
+        csrc += 1;
+        cdst += 1;
+    }
+    // Clear bottom row
+    byte col = 0;
+    while (col < 40) {
+        poke: (0x07C0 + col) value: 32;
+        col += 1;
+    }
+}
+
+// Shift screen RAM down by one row
+shiftScreenDown: {
+    word src = 0x07BF;
+    word dst = 0x07E7;
+    word csrc = 0xDBBF;
+    word cdst = 0xDBE7;
+    word limit = 0x0400;
+    while (src >= limit) {
+        poke: dst value: (peek: src);
+        poke: cdst value: (peek: csrc);
+        src -= 1;
+        dst -= 1;
+        csrc -= 1;
+        cdst -= 1;
+    }
+    // Clear top row
+    byte col = 0;
+    while (col < 40) {
+        poke: (0x0400 + col) value: 32;
+        col += 1;
+    }
+}

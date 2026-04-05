@@ -1,0 +1,135 @@
+// Cork Standard Library: Bitmap Graphics
+// import "../stdlib/bitmap.cork";
+//
+// For use with hardware { mode: bitmap; } or { mode: multicolorBitmap; }
+// Bitmap data at $2000-$3F3F, screen RAM at $0400 for cell colors.
+//
+// C64 bitmap layout: 40x25 character cells, each 8 bytes (8x8 pixels).
+// Cells left-to-right, top-to-bottom. Within a cell, bytes are rows 0-7.
+// Address = $2000 + (charRow * 40 + charCol) * 8 + pixelRow
+
+// Bit masks for pixel positions 0-7 (bit 7 = leftmost)
+const byte[8] pixelBits = { 128, 64, 32, 16, 8, 4, 2, 1 };
+
+// Clear the bitmap (8000 bytes at $2000)
+clearBitmap: {
+    word addr = 0x2000;
+    while (addr < 0x3F40) {
+        poke: addr value: 0;
+        addr += 1;
+    }
+}
+
+// Fill the bitmap with a byte pattern
+fillBitmap: (byte pattern) {
+    word addr = 0x2000;
+    while (addr < 0x3F40) {
+        poke: addr value: pattern;
+        addr += 1;
+    }
+}
+
+// Set bitmap cell colors (screen RAM: hi nybble = fg, lo nybble = bg)
+setBitmapColors: (byte fg) bg: (byte bg) {
+    byte colorByte = fg * 16 + bg;
+    word addr = 0x0400;
+    while (addr < 0x07E8) {
+        poke: addr value: colorByte;
+        addr += 1;
+    }
+}
+
+// Plot a pixel in standard bitmap mode (320x200)
+// x: 0-319 (word), y: 0-199 (byte)
+plotPixel: (word x) y: (byte y) {
+    byte charRow = y >> 3;
+    byte pixelRow = y & 7;
+
+    // cellOffset = charRow * 320 + (x & ~7) + pixelRow
+    // charRow * 320 = charRow * 256 + charRow * 64
+    // Use word arithmetic to avoid byte overflow
+    word cellOffset = 0;
+    cellOffset += charRow;
+    cellOffset <<= 6;       // charRow * 64
+    word hiPart = 0;
+    hiPart += charRow;
+    hiPart <<= 8;           // charRow * 256
+    cellOffset += hiPart;   // charRow * 320
+
+    // Add x with low 3 bits cleared (= charCol * 8)
+    word xAligned = x;
+    xAligned &= 0xFFF8;
+    cellOffset += xAligned;
+    cellOffset += pixelRow;
+    word addr = 0x2000;
+    addr += cellOffset;
+
+    // Bit mask from lookup table (x & 7 fits in byte)
+    byte bitPos = x as byte;
+    bitPos &= 7;
+    byte mask = pixelBits[bitPos];
+
+    // Read-modify-write
+    byte current = (peek: addr);
+    poke: addr value: (current | mask);
+}
+
+// Clear a pixel in standard bitmap mode
+clearPixel: (word x) y: (byte y) {
+    byte charRow = y >> 3;
+    byte pixelRow = y & 7;
+    word cellOffset = 0;
+    cellOffset += charRow;
+    cellOffset <<= 6;
+    word hiPart = 0;
+    hiPart += charRow;
+    hiPart <<= 8;
+    cellOffset += hiPart;
+    word xAligned = x;
+    xAligned &= 0xFFF8;
+    cellOffset += xAligned;
+    cellOffset += pixelRow;
+    word addr = 0x2000;
+    addr += cellOffset;
+    byte bitPos = x as byte;
+    bitPos &= 7;
+    byte mask = pixelBits[bitPos] ^ 0xFF;
+    byte current = (peek: addr);
+    poke: addr value: (current & mask);
+}
+
+// Draw a horizontal line in bitmap mode (fast: fills whole bytes)
+// x1 and x2 should be byte-aligned (multiples of 8) for best speed
+bitmapHLine: (byte y) from: (word x1) to: (word x2) {
+    word px = x1;
+    while (px <= x2) {
+        plotPixel: px y: y;
+        px += 1;
+    }
+}
+
+// Draw a vertical line in bitmap mode
+bitmapVLine: (word x) from: (byte y1) to: (byte y2) {
+    byte py = y1;
+    while (py <= y2) {
+        plotPixel: x y: py;
+        py += 1;
+    }
+}
+
+// Draw a rectangle outline in bitmap mode
+bitmapRect: (word x1) y1: (byte y1) x2: (word x2) y2: (byte y2) {
+    bitmapHLine: y1 from: x1 to: x2;
+    bitmapHLine: y2 from: x1 to: x2;
+    bitmapVLine: x1 from: y1 to: y2;
+    bitmapVLine: x2 from: y1 to: y2;
+}
+
+// Fill a rectangle in bitmap mode (slow — pixel by pixel)
+bitmapFillRect: (word x1) y1: (byte y1) x2: (word x2) y2: (byte y2) {
+    byte py = y1;
+    while (py <= y2) {
+        bitmapHLine: py from: x1 to: x2;
+        py += 1;
+    }
+}
