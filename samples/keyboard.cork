@@ -52,7 +52,7 @@ entry scene Demo {
         poke: cursorScreen value: CHAR_SPACE;
 
         if (keyboard.w) { if (posY > 1)  { posY -= 1; } }
-        if (keyboard.s) { if (posY < 23) { posY += 1; } }
+        if (keyboard.s) { if (posY <= 23) { posY += 1; } }
         if (keyboard.a) { if (posX > 0)  { posX -= 1; } }
         if (keyboard.d) { if (posX < 39) { posX += 1; } }
 
