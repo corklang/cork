@@ -12,24 +12,40 @@ entry scene Sine {
         fillBitmap: 0;
         setBitmapColors: Color.cyan bg: Color.black;
 
-        // Plot sine curve: one pixel per x, 320 points
-        word x = 0;
-        while (x < 320) {
-            // Map x (0-319) to table index (0-63): x / 5
-            byte tableIdx = x as byte;
-            tableIdx /= 5;
-            if (tableIdx > 63) { tableIdx = 63; }
-            byte sineVal = sineTable[tableIdx];
+        // Plot sine curve: 64 samples spread across 320 pixels
+        // Each sample covers 5 pixels wide for a smooth-looking curve
+        byte i = 0;
+        while (i < 64) {
+            byte sineVal = sineTable[i];
             byte y = 140 - sineVal;
+            // Plot 5 pixels per sample for continuous coverage
+            word x = 0;
+            x += i;
+            x *= 5;
             plotPixel: x y: y;
-            x += 1;
+            word x1 = x;
+            x1 += 1;
+            plotPixel: x1 y: y;
+            word x2 = x;
+            x2 += 2;
+            plotPixel: x2 y: y;
+            word x3 = x;
+            x3 += 3;
+            plotPixel: x3 y: y;
+            word x4 = x;
+            x4 += 4;
+            plotPixel: x4 y: y;
+            i += 1;
         }
 
         // Dashed horizontal axis at y=100
-        word ax = 0;
-        while (ax < 320) {
-            plotPixel: ax y: 100;
-            ax += 4;
+        byte ax = 0;
+        while (ax < 80) {
+            word axw = 0;
+            axw += ax;
+            axw *= 4;
+            plotPixel: axw y: 100;
+            ax += 1;
         }
     }
 
