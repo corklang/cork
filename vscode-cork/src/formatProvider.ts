@@ -7,15 +7,22 @@ export class CorkFormattingProvider
     doc: vscode.TextDocument,
     options: vscode.FormattingOptions
   ): vscode.TextEdit[] {
-    const indent = options.insertSpaces ? " ".repeat(options.tabSize) : "\t";
-    const lines = doc.getText().split("\n");
-    const formatted = formatLines(lines, indent);
+    console.log("[Cork] Format requested for", doc.uri.fsPath);
+    try {
+      const indent = options.insertSpaces ? " ".repeat(options.tabSize) : "\t";
+      const lines = doc.getText().split("\n");
+      const formatted = formatLines(lines, indent);
+      console.log("[Cork] Formatted", lines.length, "lines, changed:", formatted !== doc.getText());
 
-    const fullRange = new vscode.Range(
-      new vscode.Position(0, 0),
-      doc.lineAt(doc.lineCount - 1).range.end
-    );
-    return [vscode.TextEdit.replace(fullRange, formatted)];
+      const fullRange = new vscode.Range(
+        new vscode.Position(0, 0),
+        doc.lineAt(doc.lineCount - 1).range.end
+      );
+      return [vscode.TextEdit.replace(fullRange, formatted)];
+    } catch (err) {
+      console.error("[Cork] Format error:", err);
+      return [];
+    }
   }
 }
 
@@ -34,11 +41,10 @@ function formatLines(lines: string[], indent: string): string {
       // Check if this line closes the pattern
       if (trimmed.includes("`")) {
         inSpritePattern = false;
-        // Indent the closing backtick line
-        result.push(indent.repeat(depth) + trimmed);
+        result.push(indent.repeat(depth) + trimmed.replace(/`\s*;/, "`;"));
       } else {
-        // Preserve sprite pattern content, just re-indent
-        result.push(indent.repeat(depth) + trimmed);
+        // Sprite pattern content gets one extra indent level
+        result.push(indent.repeat(depth + 1) + trimmed);
       }
       consecutiveBlanks = 0;
       continue;
@@ -51,7 +57,7 @@ function formatLines(lines: string[], indent: string): string {
       inSpritePattern = true;
       const formatted = formatCodeLine(trimmed);
       result.push(indent.repeat(depth) + formatted);
-      depth += countBraceChange(formatted);
+      depth += countBraces(formatted).opens - countBraces(formatted).closes;
       consecutiveBlanks = 0;
       continue;
     }
@@ -69,18 +75,17 @@ function formatLines(lines: string[], indent: string): string {
     }
     consecutiveBlanks = 0;
 
-    // Closing brace decreases indent before the line
-    if (trimmed.startsWith("}")) {
-      depth = Math.max(0, depth - 1);
-    }
-
     const formatted = formatCodeLine(trimmed);
-    result.push(indent.repeat(depth) + formatted);
+    const { opens, closes } = countBraces(formatted);
 
-    // Opening brace increases indent after the line
-    depth += countBraceChange(formatted);
-    // Correct for lines that both close and open, e.g. `} else {`
-    // countBraceChange already handles this
+    // For lines that start with }, dedent before printing.
+    // Lines like "} else {" (starts with close) dedent first, then re-indent after.
+    // Inline blocks like "if (x) { break; }" don't start with } so no dedent.
+    const leadingCloses = formatted.startsWith("}") ? closes : 0;
+    depth = Math.max(0, depth - leadingCloses);
+    result.push(indent.repeat(depth) + formatted);
+    // Net change for next line: opens minus any non-leading closes are balanced
+    depth += opens - (closes - leadingCloses);
   }
 
   // Remove trailing blank lines, ensure single newline at end
@@ -91,8 +96,9 @@ function formatLines(lines: string[], indent: string): string {
   return result.join("\n") + "\n";
 }
 
-function countBraceChange(line: string): number {
-  let change = 0;
+function countBraces(line: string): { opens: number; closes: number } {
+  let opens = 0;
+  let closes = 0;
   let inString = false;
   let escape = false;
   for (const ch of line) {
@@ -109,74 +115,127 @@ function countBraceChange(line: string): number {
       continue;
     }
     if (inString) continue;
-    if (ch === "{") change++;
-    else if (ch === "}") change--;
+    if (ch === "{") opens++;
+    else if (ch === "}") closes++;
   }
-  return change;
+  return { opens, closes };
 }
 
 function formatCodeLine(line: string): string {
-  // Don't touch comments
+  // Don't touch full-line comments
   if (line.startsWith("//")) return line;
 
-  let result = "";
+  // Split line into code segments and string/comment literals,
+  // so we only normalize spacing in code.
+  const segments: { text: string; isCode: boolean }[] = [];
+  let current = "";
   let inString = false;
   let escape = false;
-  let i = 0;
 
-  while (i < line.length) {
+  for (let i = 0; i < line.length; i++) {
     const ch = line[i];
 
-    // Handle escape sequences in strings
     if (escape) {
-      result += ch;
+      current += ch;
       escape = false;
-      i++;
       continue;
     }
     if (ch === "\\") {
       escape = true;
-      result += ch;
-      i++;
+      current += ch;
       continue;
     }
 
-    // Toggle string state
-    if (ch === '"') {
-      inString = !inString;
-      result += ch;
-      i++;
-      continue;
-    }
-
-    // Pass through string content unchanged
-    if (inString) {
-      result += ch;
-      i++;
-      continue;
-    }
-
-    // Handle // line comments — pass the rest through
-    if (ch === "/" && i + 1 < line.length && line[i + 1] === "/") {
-      // Ensure space before comment if not at start
-      if (result.length > 0 && !result.endsWith(" ")) {
-        result += " ";
-      }
-      result += line.substring(i);
+    // Line comment — rest of line is non-code
+    if (!inString && ch === "/" && i + 1 < line.length && line[i + 1] === "/") {
+      if (current) segments.push({ text: current, isCode: true });
+      segments.push({ text: line.substring(i), isCode: false });
+      current = "";
       break;
     }
 
-    // Normalize spacing: no space before semicolons
-    if (ch === ";") {
-      result = result.trimEnd();
-      result += ";";
-      i++;
+    if (ch === '"') {
+      if (!inString) {
+        // Start of string — flush code segment
+        if (current) segments.push({ text: current, isCode: true });
+        current = '"';
+        inString = true;
+      } else {
+        // End of string
+        current += '"';
+        segments.push({ text: current, isCode: false });
+        current = "";
+        inString = false;
+      }
       continue;
     }
 
-    result += ch;
-    i++;
+    current += ch;
   }
+  if (current) segments.push({ text: current, isCode: !inString });
 
-  return result.trimEnd();
+  // Normalize spacing in code segments
+  const formatted = segments
+    .map((seg) => (seg.isCode ? normalizeCodeSpacing(seg.text) : seg.text))
+    .join("");
+
+  return formatted.trimEnd();
+}
+
+function normalizeCodeSpacing(code: string): string {
+  let s = code;
+
+  // Collapse multiple spaces to one
+  s = s.replace(/  +/g, " ");
+
+  // No space before ; or ,
+  s = s.replace(/\s+;/g, ";");
+  s = s.replace(/\s+,/g, ",");
+
+  // Single space after ; and , (but not at end of string)
+  s = s.replace(/;(?=\S)/g, "; ");
+  s = s.replace(/,(?=\S)/g, ", ");
+
+  // Colon in method calls / hardware settings: exactly one space after
+  // Match word: followed by spaces — normalize to word: single-space
+  s = s.replace(/(\w):\s{2,}/g, "$1: ");
+
+  // No space before :
+  s = s.replace(/\s+:/g, ":");
+
+  // No space after ( or before )
+  s = s.replace(/\(\s+/g, "(");
+  s = s.replace(/\s+\)/g, ")");
+
+  // No space after [ or before ]
+  s = s.replace(/\[\s+/g, "[");
+  s = s.replace(/\s+\]/g, "]");
+
+  // Space after { and before } (for inline blocks like `{ player.x += 1; }`)
+  // But not for empty {} and not for standalone braces
+  s = s.replace(/\{(?!\s|\})/g, "{ ");
+  s = s.replace(/(\S)\}/g, "$1 }");
+
+  // Normalize operators — order matters: longest first, comparisons before assignment
+
+  // Shift operators and shift-assign (must come before < > and =)
+  s = s.replace(/\s*(<<=|>>=)\s*/g, " $1 ");
+  s = s.replace(/\s*(<<|>>)\s*/g, " $1 ");
+
+  // Comparison operators
+  s = s.replace(/\s*(==|!=|<=|>=)\s*/g, " $1 ");
+  // Standalone < > (not part of << >> <= >=)
+  s = s.replace(/(?<!<)\s*<\s*(?!<|=)/g, " < ");
+  s = s.replace(/(?<!>)\s*>\s*(?!>|=)/g, " > ");
+
+  // Compound assignment operators
+  s = s.replace(/\s*(\+=|-=|\*=|\/=|%=|&=|\|=|\^=)\s*/g, " $1 ");
+
+  // Plain = (not ==, !=, <=, >=, +=, -=, *=, /=, %=, &=, |=, ^=, <<=, >>=)
+  s = s.replace(/(?<![=!<>+\-*/%&|^])\s*=\s*(?!=)/g, " = ");
+
+  // Collapse any double-spaces introduced by the above
+  s = s.replace(/  +/g, " ");
+
+  return s;
 }
