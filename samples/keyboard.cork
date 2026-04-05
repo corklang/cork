@@ -20,7 +20,7 @@ entry scene Demo {
 
     enter {
         clearScreen:;
-        printAt: 0 text: "WASD=MOVE SPACE=COLOR Q=QUIT";
+        printAt: 0 text: "WASD CHANGES X/Y  SPACE=COLOR  Q=NEXT";
     }
 
     frame {

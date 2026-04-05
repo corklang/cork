@@ -86,13 +86,15 @@ byte waitForKey: {
 
 // Debounced key read: returns a PETSCII code only on the initial
 // press, not while held. Returns 0 if no new key was pressed.
-// Call once per frame. Tracks previous key state internally.
+// Call once per frame. Tracks state via globals (not locals, which
+// would be clobbered by getKey's locals in the shared ZP zone).
 byte _prevScanKey = 0;
+byte _currScanKey = 0;
 byte getKeyOnce: {
-    byte _key = (getKey:);
-    if (_key == _prevScanKey) { return 0; }
-    _prevScanKey = _key;
-    return _key;
+    _currScanKey = (getKey:);
+    if (_currScanKey == _prevScanKey) { return 0; }
+    _prevScanKey = _currScanKey;
+    return _currScanKey;
 }
 
 // Convert a PETSCII code to a C64 screen code for display.
