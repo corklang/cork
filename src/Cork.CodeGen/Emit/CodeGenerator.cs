@@ -128,6 +128,9 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
             ctx.RegisterConstArraySize(name, size);
         foreach (var gv in globalVars)
         {
+            // Const scalars are compile-time only — no ZP allocation needed
+            if (gv.IsConst && gv.ArraySize == 0) continue;
+
             if (gv.ArraySize > 0)
             {
                 ctx.Symbols.AllocGlobalArray(gv.Name, gv.ArraySize);
@@ -141,7 +144,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
                 (reachableMethods == null || reachableMethods.Contains(gm.SelectorName)))
                 RegisterGlobalMethod(ctx, gm);
         foreach (var gv in globalVars)
-            if (gv.Initializer is IntLiteralExpr constInit)
+            if (gv.IsConst && gv.Initializer is IntLiteralExpr constInit)
                 ctx.Symbols.AddConstantNoShadowCheck(gv.Name, constInit.Value);
 
         // Register placeholder pointer constants for inline sprites (value 0 — code size unaffected)
@@ -213,6 +216,9 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
     private static void EmitGlobalInit(EmitContext ctx, GlobalVarDeclNode gv)
     {
+        // Const scalars have no runtime storage
+        if (gv.IsConst && gv.ArraySize == 0) return;
+
         var zp = ctx.Symbols.GetLocal(gv.Name);
 
         // Zero-fill global arrays

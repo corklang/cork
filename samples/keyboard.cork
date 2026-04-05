@@ -17,16 +17,34 @@ entry scene Demo {
     byte posX = 20;
     byte posY = 12;
     byte color = 1;
-    word screenPos = 0x0400;
+
+    // Word addresses for screen and color RAM
+    word cursorScreen = 0;
+    word cursorColor = 0;
+
+    computeCursor: {
+        // posY * 40 overflows a byte (12*40=480), so use word += 40 in a loop
+        cursorScreen = 0x0400;
+        cursorScreen += posX;
+        byte _r = 0;
+        while (_r < posY) { cursorScreen += 40; _r += 1; }
+
+        cursorColor = 0xD800;
+        cursorColor += posX;
+        _r = 0;
+        while (_r < posY) { cursorColor += 40; _r += 1; }
+    }
 
     enter {
         clearScreen:;
         printAt: 0 text: "WASD=MOVE SPACE=COLOR Q=NEXT";
+        // Compute initial cursor position before first frame erase
+        computeCursor:;
     }
 
     frame {
         // Erase old cursor
-        poke: screenPos value: 32;
+        poke: cursorScreen value: 32;
 
         if (keyboard.w) { if (posY > 1)  { posY -= 1; } }
         if (keyboard.s) { if (posY < 23) { posY += 1; } }
@@ -40,19 +58,12 @@ entry scene Demo {
 
         if (keyboard.q) { go NameEntry; }
 
-        // Compute screen position: $0400 + posY * 40 + posX
-        screenPos = 0x0400;
-        screenPos += posY * 40;
-        screenPos += posX;
+        // Recompute cursor position
+        computeCursor:;
 
         // Draw cursor
-        poke: screenPos value: 81;
-        // Color the cursor
-        word colorPos = 0xD800;
-        colorPos += posY * 40;
-        colorPos += posX;
-        poke: colorPos value: color;
-
+        poke: cursorScreen value: 81;
+        poke: cursorColor value: color;
         poke: 0xD020 value: color;
     }
 }
@@ -68,14 +79,12 @@ scene NameEntry {
         nameLen = 0;
         printAt: 0 text: "ENTER YOUR NAME:";
         printAt: 80 text: "RETURN=OK  DEL=BACK  F1=CANCEL";
-        // Show cursor on input line
         poke: 0x0428 value: 166;
     }
 
     frame {
         if (keyboard.f1) { go Demo; }
 
-        // Debounced: only fires once per keypress
         byte key = (getKeyOnce:);
         if (key != 0) {
             if (key == KEY_DEL) {
@@ -111,7 +120,6 @@ scene Greeting {
     enter {
         clearScreen:;
         printAt: 0 text: "HELLO, ";
-        // Copy name from global buffer to screen
         byte i = 0;
         while (i < nameLen) {
             poke: 0x0407 + i value: nameBuffer[i];
