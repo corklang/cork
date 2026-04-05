@@ -202,7 +202,7 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
             Expect(TokenKind.Equal, "=");
             var value = ParseExpression();
             Expect(TokenKind.Semicolon, ";");
-            return new GlobalVarDeclNode(typeName, scalarName, value, loc);
+            return new GlobalVarDeclNode(typeName, scalarName, value, 0, loc);
         }
 
         // const byte[N] name = { ... }; (array constant)
@@ -230,12 +230,21 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
     {
         var loc = CurrentLocation;
         var typeName = Advance().Text;
+
+        // Check for array: type[N] name;
+        var arraySize = 0;
+        if (TryConsume(TokenKind.OpenBracket))
+        {
+            arraySize = ParseArraySize();
+            Expect(TokenKind.CloseBracket, "]");
+        }
+
         var name = Expect(TokenKind.Identifier, "name").Text;
         ExprNode? init = null;
         if (TryConsume(TokenKind.Equal))
             init = ParseExpression();
         Expect(TokenKind.Semicolon, ";");
-        return new GlobalVarDeclNode(typeName, name, init, loc);
+        return new GlobalVarDeclNode(typeName, name, init, arraySize, loc);
     }
 
     // ============================================================

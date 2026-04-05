@@ -127,7 +127,15 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         foreach (var (name, size) in constArraySizes)
             ctx.RegisterConstArraySize(name, size);
         foreach (var gv in globalVars)
-            ctx.Symbols.AllocGlobal(gv.Name);
+        {
+            if (gv.ArraySize > 0)
+            {
+                ctx.Symbols.AllocGlobalArray(gv.Name, gv.ArraySize);
+                ctx.RegisterConstArraySize(gv.Name, gv.ArraySize);
+            }
+            else
+                ctx.Symbols.AllocGlobal(gv.Name);
+        }
         foreach (var decl in program.Declarations)
             if (decl is GlobalMethodNode gm &&
                 (reachableMethods == null || reachableMethods.Contains(gm.SelectorName)))
@@ -206,6 +214,16 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
     private static void EmitGlobalInit(EmitContext ctx, GlobalVarDeclNode gv)
     {
         var zp = ctx.Symbols.GetLocal(gv.Name);
+
+        // Zero-fill global arrays
+        if (gv.ArraySize > 0)
+        {
+            ctx.Buffer.EmitLdaImmediate(0);
+            for (var i = 0; i < gv.ArraySize; i++)
+                ctx.Buffer.EmitStaZeroPage((byte)(zp + i));
+            return;
+        }
+
         if (gv.Initializer is IntLiteralExpr intLit)
         {
             ctx.Buffer.EmitLdaImmediate((byte)intLit.Value);

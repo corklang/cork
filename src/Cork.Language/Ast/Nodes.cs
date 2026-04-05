@@ -87,6 +87,7 @@ public sealed record GlobalVarDeclNode(
     string TypeName,
     string Name,
     ExprNode? Initializer,
+    int ArraySize,      // 0 = not an array, >0 = mutable array of this size
     SourceLocation Location
 ) : TopLevelNode(Location);
 

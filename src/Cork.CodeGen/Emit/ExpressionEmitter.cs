@@ -87,6 +87,24 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 ctx.Buffer.EmitLdaAbsoluteX(dataAddr);
                 break;
 
+            // ZP mutable array indexing: arr[i] where arr is in zero page
+            case IndexExpr { Receiver: IdentifierExpr zpArrName } zpIndexExpr
+                when ctx.Symbols.TryGetLocal(zpArrName.Name, out _):
+            {
+                var zpBase = ctx.Symbols.GetLocal(zpArrName.Name);
+                if (zpIndexExpr.Index is IntLiteralExpr constIdx)
+                {
+                    ctx.Buffer.EmitLdaZeroPage((byte)(zpBase + (int)constIdx.Value));
+                }
+                else
+                {
+                    EmitExprToA(zpIndexExpr.Index);
+                    ctx.Buffer.EmitTax();
+                    ctx.Buffer.EmitByte(0xB5); ctx.Buffer.EmitByte(zpBase); // LDA zp,X
+                }
+                break;
+            }
+
             case MemberAccessExpr member:
                 // text.length for ref params
                 if (member.MemberName == "length" && member.Receiver is IdentifierExpr lenIdent &&

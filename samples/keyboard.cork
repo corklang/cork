@@ -4,6 +4,8 @@ import "../stdlib/keyboard.cork";
 import "../stdlib/screen.cork";
 import "../stdlib/print.cork";
 
+// Global mutable array — persists across scene transitions
+byte[16] nameBuffer;
 byte nameLen = 0;
 
 entry scene Demo {
@@ -49,46 +51,41 @@ scene NameEntry {
         background: Color.blue;
     }
 
-    byte prevKey = 0;
-
     enter {
         clearScreen:;
         nameLen = 0;
         printAt: 0 text: "ENTER YOUR NAME:";
         printAt: 80 text: "RETURN=OK  DEL=BACK  F1=CANCEL";
-        // Cursor on input line (screen $0428 = row 1, col 0)
+        // Show cursor on input line
         poke: 0x0428 value: 166;
     }
 
     frame {
         if (keyboard.f1) { go Demo; }
 
-        byte key = (getKey:);
-
-        // Debounce: only act when key state changes
-        if (key != prevKey) {
-            if (key != 0) {
-                if (key == KEY_DEL) {
-                    if (nameLen > 0) {
-                        poke: 0x0428 + nameLen value: 32;
-                        nameLen -= 1;
-                        poke: 0x0428 + nameLen value: 166;
-                    }
+        // Debounced: only fires once per keypress
+        byte key = (getKeyOnce:);
+        if (key != 0) {
+            if (key == KEY_DEL) {
+                if (nameLen > 0) {
+                    poke: 0x0428 + nameLen value: 32;
+                    nameLen -= 1;
+                    poke: 0x0428 + nameLen value: 166;
+                }
+            } else {
+                if (key == KEY_RETURN) {
+                    poke: 0x0428 + nameLen value: 32;
+                    go Greeting;
                 } else {
-                    if (key == KEY_RETURN) {
-                        poke: 0x0428 + nameLen value: 32;
-                        go Greeting;
-                    } else {
-                        if (nameLen < 16) {
-                            byte sc = (toScreenCode: key);
-                            poke: 0x0428 + nameLen value: sc;
-                            nameLen += 1;
-                            poke: 0x0428 + nameLen value: 166;
-                        }
+                    if (nameLen < 16) {
+                        byte sc = (toScreenCode: key);
+                        nameBuffer[nameLen] = sc;
+                        poke: 0x0428 + nameLen value: sc;
+                        nameLen += 1;
+                        poke: 0x0428 + nameLen value: 166;
                     }
                 }
             }
-            prevKey = key;
         }
     }
 }
@@ -100,33 +97,20 @@ scene Greeting {
     }
 
     enter {
-        // Copy name from NameEntry screen to greeting position
-        // before clearScreen overwrites it. Use $0200-$020F as temp
-        // (cassette buffer — safe to use, not needed by Cork programs).
-        byte i = 0;
-        while (i < nameLen) {
-            byte ch = (peek: 0x0428 + i);
-            poke: 0x0200 + i value: ch;
-            i += 1;
-        }
-
         clearScreen:;
         printAt: 0 text: "HELLO, ";
-
-        // Copy name from temp to screen
-        i = 0;
+        // Copy name from global buffer to screen
+        byte i = 0;
         while (i < nameLen) {
-            byte ch = (peek: 0x0200 + i);
-            poke: 0x0407 + i value: ch;
+            poke: 0x0407 + i value: nameBuffer[i];
             i += 1;
         }
         poke: 0x0407 + nameLen value: 33;
-
         printAt: 80 text: "PRESS ANY KEY";
     }
 
     frame {
-        byte key = (getKey:);
+        byte key = (getKeyOnce:);
         if (key != 0) { go Demo; }
     }
 }

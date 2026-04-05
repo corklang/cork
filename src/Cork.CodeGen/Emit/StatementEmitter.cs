@@ -218,6 +218,26 @@ public sealed class StatementEmitter(EmitContext ctx)
         {
             zp = (byte)(strInfo.ZpBase + (int)strIdx.Value);
         }
+        // ZP mutable array indexed assignment: arr[i] = value;
+        else if (assign.Target is IndexExpr { Receiver: IdentifierExpr zpArrIdent } zpArrIdx &&
+                 ctx.Symbols.TryGetLocal(zpArrIdent.Name, out var zpArrBase) &&
+                 assign.Op == TokenKind.Equal)
+        {
+            ctx.Expressions.EmitExprToA(assign.Value);
+            if (zpArrIdx.Index is IntLiteralExpr constArrIdx)
+            {
+                ctx.Buffer.EmitStaZeroPage((byte)(zpArrBase + (int)constArrIdx.Value));
+            }
+            else
+            {
+                ctx.Buffer.EmitPha();
+                ctx.Expressions.EmitExprToA(zpArrIdx.Index);
+                ctx.Buffer.EmitTax();
+                ctx.Buffer.EmitPla();
+                ctx.Buffer.EmitByte(0x95); ctx.Buffer.EmitByte(zpArrBase); // STA zp,X
+            }
+            return;
+        }
         else
         {
             throw new CompileError("Unsupported assignment target", assign.Target.Location);

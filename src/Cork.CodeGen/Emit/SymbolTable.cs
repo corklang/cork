@@ -92,6 +92,17 @@ public sealed class SymbolTable
         return _globals[name];
     }
 
+    public byte AllocGlobalArray(string name, int count)
+    {
+        var addr = _globalZpEnd;
+        _globalZpEnd += (byte)count;
+        if (_globalZpEnd >= 0x80) throw new InvalidOperationException("Out of global zero page slots");
+        _globals[name] = addr;
+        _locals[name] = addr;
+        _globalNames.Add(name);
+        return addr;
+    }
+
     // --- Lookup ---
 
     public byte GetLocal(string name) =>

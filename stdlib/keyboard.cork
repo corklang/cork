@@ -84,6 +84,17 @@ byte waitForKey: {
     return _key;
 }
 
+// Debounced key read: returns a PETSCII code only on the initial
+// press, not while held. Returns 0 if no new key was pressed.
+// Call once per frame. Tracks previous key state internally.
+byte _prevScanKey = 0;
+byte getKeyOnce: {
+    byte _key = (getKey:);
+    if (_key == _prevScanKey) { return 0; }
+    _prevScanKey = _key;
+    return _key;
+}
+
 // Convert a PETSCII code to a C64 screen code for display.
 // Covers letters (A-Z), digits, space, and common punctuation.
 byte toScreenCode: (byte _pet) {
