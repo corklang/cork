@@ -1,0 +1,33 @@
+// Feature: word arithmetic in expressions (not just compound assignments)
+
+entry scene Demo {
+    hardware {
+        border: Color.blue;
+        background: Color.black;
+    }
+
+    enter {
+        word a = 300;
+        word b = 150;
+
+        // Word addition in declaration
+        word sum = a + b;
+        debugHex: 0 value: sum;
+
+        // Word subtraction in declaration
+        word diff = a - b;
+        debugHex: 40 value: diff;
+
+        // Word multiply (16x8)
+        word product = a * 2;
+        debugHex: 80 value: product;
+
+        // Byte multiply with 16-bit result
+        byte x = 200;
+        byte y = 3;
+        word wide = x * y;
+        debugHex: 120 value: wide;
+    }
+
+    frame { }
+}

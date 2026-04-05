@@ -323,23 +323,14 @@ public sealed class SceneEmitter(EmitContext ctx)
             ctx.Buffer.EmitStaAbsolute(0xD010);
         }
 
-        // Sprite pointer
+        // Sprite pointer (from inline pattern — pointer computed during codegen)
         if (dataRef != null)
         {
-            // Try derived name first, then common names
-            string[] ptrNames = [
-                dataRef.EndsWith("Sprite") ? dataRef[..^6] + "Ptr" : dataRef + "Ptr",
-                "spritePtr",
-                dataRef.EndsWith("Data") ? dataRef[..^4] + "Ptr" : ""
-            ];
-            foreach (var ptrName in ptrNames)
+            var ptrName = dataRef.Replace("Data", "Ptr");
+            if (ctx.Symbols.TryGetConstant(ptrName, out var ptrVal))
             {
-                if (ptrName != "" && ctx.Symbols.TryGetConstant(ptrName, out var ptrVal))
-                {
-                    ctx.Buffer.EmitLdaImmediate((byte)ptrVal);
-                    ctx.Buffer.EmitStaAbsolute((ushort)(0x07F8 + idx));
-                    break;
-                }
+                ctx.Buffer.EmitLdaImmediate((byte)ptrVal);
+                ctx.Buffer.EmitStaAbsolute((ushort)(0x07F8 + idx));
             }
         }
 

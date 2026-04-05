@@ -73,30 +73,6 @@ public static class ReachabilityAnalysis
             if (allConstArrays.Contains(id)) constArrays.Add(id);
         }
 
-        // Sprite data: 63-byte const arrays are copied by EmitSpriteCopies which
-        // finds them by scanning all ConstArrayDeclNode and matching pointer globals
-        // by naming convention. Include array + pointer if either side is reachable.
-        foreach (var ca in program.Declarations.OfType<ConstArrayDeclNode>())
-        {
-            if (ca.Size != 63) continue;
-            string[] ptrNames = [
-                ca.Name.Replace("Data", "Ptr"),
-                ca.Name.EndsWith("Sprite") ? ca.Name[..^6] + "Ptr" : "",
-                "spritePtr"
-            ];
-            foreach (var ptrName in ptrNames)
-            {
-                if (ptrName == "" || !allGlobalVars.Contains(ptrName)) continue;
-                // Include both if either the array or pointer is referenced
-                if (constArrays.Contains(ca.Name) || identifiers.Contains(ptrName))
-                {
-                    constArrays.Add(ca.Name);
-                    globalVars.Add(ptrName);
-                    break;
-                }
-            }
-        }
-
         return new ReachableSet(methods, globalVars, constArrays, identifiers);
     }
 
@@ -133,20 +109,6 @@ public static class ReachabilityAnalysis
                             CollectFromExpr(vd.Initializer, methods, identifiers);
                         break;
                 }
-            }
-        }
-    }
-
-    private static void CollectFromScene(SceneNode scene, HashSet<string> identifiers)
-    {
-        // Scene-level sprite data references
-        foreach (var member in scene.Members)
-        {
-            if (member is SpriteBlockNode sprite)
-            {
-                foreach (var s in sprite.Settings)
-                    if (s.Name == "data" && s.Value is IdentifierExpr dataIdent)
-                        identifiers.Add(dataIdent.Name);
             }
         }
     }

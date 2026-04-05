@@ -129,17 +129,7 @@ public sealed class SymbolTable
 
     public void ResetToGlobalScope()
     {
-        _locals.Clear();
-        _varTypes.Clear();
-        _constants.Clear();
-        _structInstances.Clear();
-        foreach (var (name, zp) in _globals)
-            _locals[name] = zp;
-        foreach (var (name, type) in _globalVarTypes)
-            _varTypes[name] = type;
-        foreach (var (name, val) in _globalConstants)
-            _constants[name] = val;
-        _nextZp = _globalZpEnd;
+        ResetCoreState();
     }
 
     public void RegisterSpriteSync(string name, int spriteIndex, byte xZp, byte yZp)
@@ -175,15 +165,20 @@ public sealed class SymbolTable
 
     public void ResetForScene()
     {
-        _locals.Clear();
-        _varTypes.Clear();
-        _constants.Clear();
-        _structInstances.Clear();
+        ResetCoreState();
         _structArrays.Clear();
         _stringVars.Clear();
         _spriteSyncRegs.Clear();
         // Note: _refParams NOT cleared — global method ref params persist
         _emittedStructMethods.Clear();
+    }
+
+    private void ResetCoreState()
+    {
+        _locals.Clear();
+        _varTypes.Clear();
+        _constants.Clear();
+        _structInstances.Clear();
         foreach (var (name, zp) in _globals)
             _locals[name] = zp;
         foreach (var (name, type) in _globalVarTypes)

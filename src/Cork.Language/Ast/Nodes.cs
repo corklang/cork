@@ -70,7 +70,7 @@ public sealed record StructMethodNode(
     SourceLocation Location
 )
 {
-    public string SelectorName => string.Join("", Parameters.Select(p => p.SelectorName + ":"));
+    public string SelectorName => Parameters.ToSelectorName();
 }
 
 public sealed record GlobalMethodNode(
@@ -80,7 +80,7 @@ public sealed record GlobalMethodNode(
     SourceLocation Location
 ) : TopLevelNode(Location)
 {
-    public string SelectorName => string.Join("", Parameters.Select(p => p.SelectorName + ":"));
+    public string SelectorName => Parameters.ToSelectorName();
 }
 
 public sealed record GlobalVarDeclNode(
@@ -148,7 +148,7 @@ public sealed record SceneMethodNode(
     SourceLocation Location
 ) : SceneMemberNode(Location)
 {
-    public string SelectorName => string.Join("", Parameters.Select(p => p.SelectorName + ":"));
+    public string SelectorName => Parameters.ToSelectorName();
 }
 
 // ============================================================
@@ -254,6 +254,13 @@ public sealed record MethodParameter(
     string TypeName,
     string ParamName
 );
+
+// Shared helper for computing selector names from method parameters
+public static class MethodParameterExtensions
+{
+    public static string ToSelectorName(this List<MethodParameter> parameters) =>
+        string.Join("", parameters.Select(p => p.SelectorName + ":"));
+}
 
 // ============================================================
 // Expressions

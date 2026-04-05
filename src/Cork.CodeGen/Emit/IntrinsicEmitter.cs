@@ -419,44 +419,4 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
         ctx.Buffer.EmitJsrForward("_rt_debughex");
     }
 
-    public void EmitSpriteCopies(ProgramNode program, Dictionary<string, ushort> dataAddresses)
-    {
-        foreach (var decl in program.Declarations)
-        {
-            if (decl is ConstArrayDeclNode { Size: 63 } constArr &&
-                dataAddresses.TryGetValue(constArr.Name, out var srcAddr))
-            {
-                // Try multiple naming conventions to find the sprite pointer
-                string[] ptrNames = [
-                    constArr.Name.Replace("Data", "Ptr"),
-                    constArr.Name.EndsWith("Sprite") ? constArr.Name[..^6] + "Ptr" : "",
-                    "spritePtr"
-                ];
-                byte? ptrValue = null;
-                foreach (var tryName in ptrNames)
-                {
-                    if (tryName == "") continue;
-                    foreach (var gv in program.Declarations.OfType<GlobalVarDeclNode>())
-                    {
-                        if (gv.Name == tryName && gv.Initializer is IntLiteralExpr intLit)
-                        {
-                            ptrValue = (byte)intLit.Value;
-                            break;
-                        }
-                    }
-                    if (ptrValue != null) break;
-                }
-
-                if (ptrValue == null) continue;
-
-                var destAddr = (ushort)(ptrValue.Value * 64);
-
-                ctx.Buffer.EmitLdxImmediate(62);
-                ctx.Buffer.EmitLdaAbsoluteX(srcAddr);
-                ctx.Buffer.EmitStaAbsoluteX(destAddr);
-                ctx.Buffer.EmitDex();
-                ctx.Buffer.EmitBpl(unchecked((sbyte)(-9)));
-            }
-        }
-    }
 }

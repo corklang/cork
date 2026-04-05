@@ -17,20 +17,44 @@ entry scene Demo {
         background: Color.black;
     }
 
+    sprite 0 ball {
+        data: `
+            . . . . . . . . . # # # # # # . . . . . . . . .
+            . . . . . . . # # # # # # # # # # . . . . . . .
+            . . . . . # # # # # # # # # # # # # # . . . . .
+            . . . . # # # # # # # # # # # # # # # # . . . .
+            . . . # # # # # # # # # # # # # # # # # # . . .
+            . . # # # # # # # # # # # # # # # # # # # # . .
+            . . # # # # # # # # # # # # # # # # # # # # . .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . . # # # # # # # # # # # # # # # # # # # # . .
+            . . # # # # # # # # # # # # # # # # # # # # . .
+            . . . # # # # # # # # # # # # # # # # # # . . .
+            . . . . # # # # # # # # # # # # # # # # . . . .
+            . . . . . # # # # # # # # # # # # # # . . . . .
+            . . . . . . . # # # # # # # # # # . . . . . . .
+            . . . . . . . . . # # # # # # . . . . . . . . .
+            . . . . . . . . . . . . . . . . . . . . . . . .
+            . . . . . . . . . . . . . . . . . . . . . . . .
+        `;
+        x: 72;
+        y: 55;
+        color: Color.white;
+    }
+
     fixed ballY = 55.0;
     sfixed velY = 0.0;
     sfixed gravity = 0.1;
-    byte ballX = 72;
 
     const byte MIN_X = 24;
     const byte MAX_X = 250;
 
     enter {
         clearScreen:;
-        poke: 0x07F8 value: spritePtr;
-        poke: 0xD015 value: 1;
-        poke: 0xD027 value: 1;
-        poke: 0xD000 value: ballX;
     }
 
     frame {
@@ -51,37 +75,11 @@ entry scene Demo {
         debugHex: 40 value: ballY;
         poke: 0xD001 value: ballY;
 
-        if (joystick.port2.left)  { if (ballX >= MIN_X) { ballX -= 1; } }
-        if (joystick.port2.right) { if (ballX <= MAX_X) { ballX += 1; } }
-        poke: 0xD000 value: ballX;
+        if (joystick.port2.left)  { if (ball.x >= MIN_X) { ball.x -= 1; } }
+        if (joystick.port2.right) { if (ball.x <= MAX_X) { ball.x += 1; } }
 
         if (joystick.port2.fire) {
             velY = -4.0;
         }
     }
 }
-
-const byte spritePtr = 13;
-const byte[63] spriteData = {
-    0x00, 0x7E, 0x00,
-    0x01, 0xFF, 0x80,
-    0x07, 0xFF, 0xE0,
-    0x0F, 0xFF, 0xF0,
-    0x1F, 0xFF, 0xF8,
-    0x3F, 0xFF, 0xFC,
-    0x3F, 0xFF, 0xFC,
-    0x7F, 0xFF, 0xFE,
-    0x7F, 0xFF, 0xFE,
-    0x7F, 0xFF, 0xFE,
-    0x7F, 0xFF, 0xFE,
-    0x7F, 0xFF, 0xFE,
-    0x3F, 0xFF, 0xFC,
-    0x3F, 0xFF, 0xFC,
-    0x1F, 0xFF, 0xF8,
-    0x0F, 0xFF, 0xF0,
-    0x07, 0xFF, 0xE0,
-    0x01, 0xFF, 0x80,
-    0x00, 0x7E, 0x00,
-    0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00
-};

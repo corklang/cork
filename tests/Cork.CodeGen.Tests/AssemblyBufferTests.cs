@@ -177,4 +177,60 @@ public class AssemblyBufferTests
         await Assert.That(bytes[0]).IsEqualTo((byte)0x78);
         await Assert.That(bytes[1]).IsEqualTo((byte)0x58);
     }
+
+    // --- Peephole optimizer tests ---
+
+    [Test]
+    public async Task Peephole_removes_redundant_LDA_immediate()
+    {
+        var buf = new AssemblyBuffer(0x0800);
+        buf.EmitLdaImmediate(10); // will be removed
+        buf.EmitLdaImmediate(20); // keeps this one
+
+        var bytes = buf.ToArray();
+        await Assert.That(bytes).Count().IsEqualTo(2);
+        await Assert.That(bytes[0]).IsEqualTo((byte)0xA9);
+        await Assert.That(bytes[1]).IsEqualTo((byte)20);
+        await Assert.That(buf.PeepholeRemovals).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task Peephole_removes_STA_LDA_same_zeropage()
+    {
+        var buf = new AssemblyBuffer(0x0800);
+        buf.EmitLdaImmediate(42);
+        buf.EmitStaZeroPage(0x02);
+        buf.EmitLdaZeroPage(0x02); // redundant — A already holds 42
+
+        var bytes = buf.ToArray();
+        // Should be: LDA #42, STA $02 (4 bytes, LDA zp removed)
+        await Assert.That(bytes).Count().IsEqualTo(4);
+        await Assert.That(buf.PeepholeRemovals).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task Peephole_keeps_STA_LDA_different_zeropage()
+    {
+        var buf = new AssemblyBuffer(0x0800);
+        buf.EmitLdaImmediate(42);
+        buf.EmitStaZeroPage(0x02);
+        buf.EmitLdaZeroPage(0x03); // different address — must keep
+
+        var bytes = buf.ToArray();
+        await Assert.That(bytes).Count().IsEqualTo(6);
+        await Assert.That(buf.PeepholeRemovals).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task Peephole_resets_at_label()
+    {
+        var buf = new AssemblyBuffer(0x0800);
+        buf.EmitStaZeroPage(0x02);
+        buf.DefineLabel("target"); // branch target — resets peephole
+        buf.EmitLdaZeroPage(0x02); // must NOT be removed
+
+        var bytes = buf.ToArray();
+        await Assert.That(bytes).Count().IsEqualTo(4); // STA zp + LDA zp
+        await Assert.That(buf.PeepholeRemovals).IsEqualTo(0);
+    }
 }

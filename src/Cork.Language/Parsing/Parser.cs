@@ -83,31 +83,8 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
     private GlobalMethodNode ParseGlobalMethod()
     {
         var loc = CurrentLocation;
-        string? returnType = null;
-
-        if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && PeekIs(2, TokenKind.Colon))
-            returnType = Advance().Text;
-
-        var parameters = new List<MethodParameter>();
-        while (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Colon))
-        {
-            var selectorName = Advance().Text;
-            Advance(); // colon
-
-            if (Check(TokenKind.OpenParen))
-            {
-                Advance();
-                var paramType = ParseParamType();
-                var paramName = Expect(TokenKind.Identifier, "parameter name").Text;
-                Expect(TokenKind.CloseParen, ")");
-                parameters.Add(new MethodParameter(selectorName, paramType, paramName));
-            }
-            else
-            {
-                parameters.Add(new MethodParameter(selectorName, "", ""));
-            }
-        }
-
+        var returnType = TryParseReturnType();
+        var parameters = ParseMethodParameters();
         var body = ParseBlock();
         return new GlobalMethodNode(returnType, parameters, body, loc);
     }
@@ -188,31 +165,8 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
     private StructMethodNode ParseStructMethod()
     {
         var loc = CurrentLocation;
-        string? returnType = null;
-
-        if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && PeekIs(2, TokenKind.Colon))
-            returnType = Advance().Text;
-
-        var parameters = new List<MethodParameter>();
-        while (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Colon))
-        {
-            var selectorName = Advance().Text;
-            Advance(); // colon
-
-            if (Check(TokenKind.OpenParen))
-            {
-                Advance();
-                var paramType = ParseParamType();
-                var paramName = Expect(TokenKind.Identifier, "parameter name").Text;
-                Expect(TokenKind.CloseParen, ")");
-                parameters.Add(new MethodParameter(selectorName, paramType, paramName));
-            }
-            else
-            {
-                parameters.Add(new MethodParameter(selectorName, "", ""));
-            }
-        }
-
+        var returnType = TryParseReturnType();
+        var parameters = ParseMethodParameters();
         var body = ParseBlock();
         return new StructMethodNode(returnType, parameters, body, loc);
     }
@@ -253,12 +207,7 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
 
         // const byte[N] name = { ... }; (array constant)
         Expect(TokenKind.OpenBracket, "[");
-        var sizeExpr = ParseExpression();
-        var size = sizeExpr is IntLiteralExpr intLit
-            ? (int)intLit.Value
-            : throw Error("Array size must be an integer literal");
-        if (size > 256)
-            throw Error($"Array size {size} exceeds maximum of 256 (8-bit index register limit)");
+        var size = ParseArraySize();
         Expect(TokenKind.CloseBracket, "]");
         var name = Expect(TokenKind.Identifier, "name").Text;
         Expect(TokenKind.Equal, "=");
@@ -314,7 +263,7 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
         if (Check(TokenKind.ConstKw))
         {
             Advance();
-            _nextIsConst = true;
+            _parsingConstDecl = true;
             return ParseSceneVarDecl();
         }
 
@@ -406,9 +355,9 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
         return new RasterBlockNode(line, body, loc);
     }
 
-    private bool _nextIsConst;
+    private bool _parsingConstDecl;
 
-    private static int _spriteCounter;
+    private int _spriteCounter;
 
     private SpriteBlockNode ParseSpriteBlock()
     {
@@ -447,20 +396,15 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
     private SceneVarDeclNode ParseSceneVarDecl()
     {
         var loc = CurrentLocation;
-        var isConst = _nextIsConst;
-        _nextIsConst = false;
+        var isConst = _parsingConstDecl;
+        _parsingConstDecl = false;
         var typeName = Advance().Text;
 
         // Check for array: TypeName[N]
         var arraySize = 0;
         if (TryConsume(TokenKind.OpenBracket))
         {
-            var sizeExpr = ParseExpression();
-            arraySize = sizeExpr is IntLiteralExpr intLit
-                ? (int)intLit.Value
-                : throw Error("Array size must be an integer literal");
-            if (arraySize > 256)
-                throw Error($"Array size {arraySize} exceeds maximum of 256 (8-bit index register limit)");
+            arraySize = ParseArraySize();
             Expect(TokenKind.CloseBracket, "]");
         }
 
@@ -475,35 +419,8 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
     private SceneMethodNode ParseSceneMethod()
     {
         var loc = CurrentLocation;
-        string? returnType = null;
-
-        // Check for return type (type keyword before selector name)
-        if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && PeekIs(2, TokenKind.Colon))
-            returnType = Advance().Text;
-
-        // Parse selector segments with parameters
-        var parameters = new List<MethodParameter>();
-        while (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Colon))
-        {
-            var selectorName = Advance().Text;
-            Advance(); // consume colon
-
-            // Check for parameter: (type name)
-            if (Check(TokenKind.OpenParen))
-            {
-                Advance(); // (
-                var paramType = ParseParamType();
-                var paramName = Expect(TokenKind.Identifier, "parameter name").Text;
-                Expect(TokenKind.CloseParen, ")");
-                parameters.Add(new MethodParameter(selectorName, paramType, paramName));
-            }
-            else
-            {
-                // No parameter for this segment (e.g., clearScreen:)
-                parameters.Add(new MethodParameter(selectorName, "", ""));
-            }
-        }
-
+        var returnType = TryParseReturnType();
+        var parameters = ParseMethodParameters();
         var body = ParseBlock();
         return new SceneMethodNode(returnType, parameters, body, loc);
     }
@@ -543,7 +460,7 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
         if (Check(TokenKind.ConstKw) && (PeekIs(1, TokenKind.Identifier) || IsTypeKeyword(tokens[_pos + 1].Kind)))
         {
             Advance();
-            _nextIsConst = true;
+            _parsingConstDecl = true;
             return ParseLocalVarDecl();
         }
 
@@ -728,8 +645,8 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
     private VarDeclStmt ParseLocalVarDecl()
     {
         var loc = CurrentLocation;
-        var isConst = _nextIsConst;
-        _nextIsConst = false;
+        var isConst = _parsingConstDecl;
+        _parsingConstDecl = false;
         var typeName = Advance().Text;
         var name = Expect(TokenKind.Identifier, "name").Text;
         ExprNode? init = null;
@@ -1094,6 +1011,48 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
     /// because identifier-colon is not a valid continuation of a binary expression.
     /// </summary>
     private ExprNode ParseMessageArgExpression() => ParseExpression();
+
+    private int ParseArraySize()
+    {
+        var sizeExpr = ParseExpression();
+        var size = sizeExpr is IntLiteralExpr intLit
+            ? (int)intLit.Value
+            : throw Error("Array size must be an integer literal");
+        if (size > 256)
+            throw Error($"Array size {size} exceeds maximum of 256 (8-bit index register limit)");
+        return size;
+    }
+
+    private string? TryParseReturnType()
+    {
+        if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && PeekIs(2, TokenKind.Colon))
+            return Advance().Text;
+        return null;
+    }
+
+    private List<MethodParameter> ParseMethodParameters()
+    {
+        var parameters = new List<MethodParameter>();
+        while (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Colon))
+        {
+            var selectorName = Advance().Text;
+            Advance(); // consume colon
+
+            if (Check(TokenKind.OpenParen))
+            {
+                Advance();
+                var paramType = ParseParamType();
+                var paramName = Expect(TokenKind.Identifier, "parameter name").Text;
+                Expect(TokenKind.CloseParen, ")");
+                parameters.Add(new MethodParameter(selectorName, paramType, paramName));
+            }
+            else
+            {
+                parameters.Add(new MethodParameter(selectorName, "", ""));
+            }
+        }
+        return parameters;
+    }
 
     /// <summary>
     /// Parse a parameter type, handling array suffix: byte[] → "byte[]"

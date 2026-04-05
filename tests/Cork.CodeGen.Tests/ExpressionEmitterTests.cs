@@ -122,4 +122,59 @@ public class ExpressionEmitterTests
         var result = expr.EvalConstExpr(new IntLiteralExpr(7, Loc));
         await Assert.That(result).IsEqualTo((byte)7);
     }
+
+    [Test]
+    public async Task Word_binary_expr_init_emits_16bit_code()
+    {
+        var (ctx, _) = CreateEmitter();
+
+        // Allocate two word variables
+        var aZp = ctx.Symbols.AllocWordZeroPage("a");
+        ctx.Symbols.SetVarType("a", "word");
+        var bZp = ctx.Symbols.AllocWordZeroPage("b");
+        ctx.Symbols.SetVarType("b", "word");
+
+        // word sum = a + b  (binary expression init for 16-bit type)
+        var addExpr = new BinaryExpr(
+            new IdentifierExpr("a", Loc),
+            TokenKind.Plus,
+            new IdentifierExpr("b", Loc),
+            Loc
+        );
+        var decl = new VarDeclStmt(false, "word", "sum", addExpr, Loc);
+        ctx.Statements.EmitVarDecl(decl);
+
+        // Should have emitted instructions (not thrown)
+        var bytes = ctx.Buffer.ToArray();
+        await Assert.That(bytes.Length).IsGreaterThan(0);
+
+        // Verify sum was allocated as a word
+        await Assert.That(ctx.Symbols.IsWordVar("sum")).IsTrue();
+    }
+
+    [Test]
+    public async Task Word_multiply_byte_operands_emits_16bit_result()
+    {
+        var (ctx, _) = CreateEmitter();
+
+        // Allocate byte variables
+        ctx.Symbols.AllocZeroPage("x");
+        ctx.Symbols.SetVarType("x", "byte");
+        ctx.Symbols.AllocZeroPage("y");
+        ctx.Symbols.SetVarType("y", "byte");
+
+        // word result = x * y
+        var mulExpr = new BinaryExpr(
+            new IdentifierExpr("x", Loc),
+            TokenKind.Star,
+            new IdentifierExpr("y", Loc),
+            Loc
+        );
+        var decl = new VarDeclStmt(false, "word", "result", mulExpr, Loc);
+        ctx.Statements.EmitVarDecl(decl);
+
+        var bytes = ctx.Buffer.ToArray();
+        await Assert.That(bytes.Length).IsGreaterThan(0);
+        await Assert.That(ctx.Symbols.IsWordVar("result")).IsTrue();
+    }
 }

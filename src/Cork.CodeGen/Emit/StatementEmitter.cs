@@ -92,6 +92,12 @@ public sealed class StatementEmitter(EmitContext ctx)
                 ctx.Buffer.EmitLdaImmediate(0);
                 ctx.Buffer.EmitStaZeroPage((byte)(zp + 1));
             }
+            else if (initializer is BinaryExpr bin && TryMapToCompoundOp(bin.Op, out var compoundOp))
+            {
+                // word x = a + b → init x = a, then x += b (reuses 16-bit compound assignment)
+                EmitWordInit(zp, typeName, bin.Left);
+                EmitWordAssignment(zp, compoundOp, bin.Right);
+            }
             else
             {
                 var val = ExpressionEmitter.Resolve16BitInitializer(typeName, initializer);
@@ -116,6 +122,59 @@ public sealed class StatementEmitter(EmitContext ctx)
                 ctx.Buffer.EmitStaZeroPage(zp);
             }
         }
+    }
+
+    /// <summary>
+    /// Initialize a word ZP location from a single expression (the left side of a binary init).
+    /// Handles word vars, byte vars, literals, and byte expressions.
+    /// </summary>
+    private void EmitWordInit(byte zp, string typeName, ExprNode expr)
+    {
+        var zpHi = (byte)(zp + 1);
+
+        if (expr is IdentifierExpr ident && ctx.Symbols.IsWordVar(ident.Name))
+        {
+            var srcZp = ctx.Symbols.GetLocal(ident.Name);
+            ctx.Buffer.EmitLdaZeroPage(srcZp);
+            ctx.Buffer.EmitStaZeroPage(zp);
+            ctx.Buffer.EmitLdaZeroPage((byte)(srcZp + 1));
+            ctx.Buffer.EmitStaZeroPage(zpHi);
+        }
+        else if (ctx.Expressions.TryFoldConstant(expr, out _) || expr is FixedLiteralExpr || expr is UnaryExpr)
+        {
+            var val = ExpressionEmitter.Resolve16BitInitializer(typeName, expr);
+            ctx.Buffer.EmitLdaImmediate((byte)(val & 0xFF));
+            ctx.Buffer.EmitStaZeroPage(zp);
+            ctx.Buffer.EmitLdaImmediate((byte)(val >> 8));
+            ctx.Buffer.EmitStaZeroPage(zpHi);
+        }
+        else
+        {
+            // Byte expression → evaluate to A, widen to 16-bit
+            ctx.Expressions.EmitExprToA(expr);
+            ctx.Buffer.EmitStaZeroPage(zp);
+            ctx.Buffer.EmitLdaImmediate(0);
+            ctx.Buffer.EmitStaZeroPage(zpHi);
+        }
+    }
+
+    private static bool TryMapToCompoundOp(TokenKind binaryOp, out TokenKind compoundOp)
+    {
+        compoundOp = binaryOp switch
+        {
+            TokenKind.Plus => TokenKind.PlusEqual,
+            TokenKind.Minus => TokenKind.MinusEqual,
+            TokenKind.Star => TokenKind.StarEqual,
+            TokenKind.Slash => TokenKind.SlashEqual,
+            TokenKind.Percent => TokenKind.PercentEqual,
+            TokenKind.Ampersand => TokenKind.AmpEqual,
+            TokenKind.Pipe => TokenKind.PipeEqual,
+            TokenKind.Caret => TokenKind.CaretEqual,
+            TokenKind.ShiftLeft => TokenKind.ShiftLeftEqual,
+            TokenKind.ShiftRight => TokenKind.ShiftRightEqual,
+            _ => TokenKind.Eof // sentinel
+        };
+        return compoundOp != TokenKind.Eof;
     }
 
     public void EmitAssignment(AssignmentStmt assign)

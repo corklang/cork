@@ -152,8 +152,6 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         ctx.Buffer.EmitSei();
         foreach (var gv in globalVars)
             EmitGlobalInit(ctx, gv);
-        ctx.Intrinsics.EmitSpriteCopies(program, ctx.DataAddresses);
-
         // SID noise setup for random: — voice 3 max frequency + noise waveform
         if (usesRandom)
         {

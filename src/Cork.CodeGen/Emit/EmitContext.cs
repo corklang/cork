@@ -103,12 +103,6 @@ public sealed class EmitContext
 
     public int InlineDataSize => _inlineData.Sum(d => d.Data.Length);
 
-    public void ClearInlineData()
-    {
-        _inlineData.Clear();
-        _inlineDataAddresses.Clear();
-    }
-
     // Sprite VIC-II registers dirtied by the current scene (cleared on go)
     public HashSet<ushort> DirtySpriteRegs { get; } = [];
 

@@ -37,6 +37,35 @@ entry scene Title {
         background: Color.blue;
     }
 
+    sprite 0 titleBall {
+        data: `
+            . . . . . . . . . # # # # # # . . . . . . . . .
+            . . . . . . . # # # # # # # # # # . . . . . . .
+            . . . . . # # # # # # # # # # # # # # . . . . .
+            . . . . # # # # # # # # # # # # # # # # . . . .
+            . . . # # # # # # # # # # # # # # # # # # . . .
+            . . # # # # # # # # # # # # # # # # # # # # . .
+            . . # # # # # # # # # # # # # # # # # # # # . .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . . # # # # # # # # # # # # # # # # # # # # . .
+            . . # # # # # # # # # # # # # # # # # # # # . .
+            . . . # # # # # # # # # # # # # # # # # # . . .
+            . . . . # # # # # # # # # # # # # # # # . . . .
+            . . . . . # # # # # # # # # # # # # # . . . . .
+            . . . . . . . # # # # # # # # # # . . . . . . .
+            . . . . . . . . . # # # # # # . . . . . . . . .
+            . . . . . . . . . . . . . . . . . . . . . . . .
+            . . . . . . . . . . . . . . . . . . . . . . . .
+        `;
+        x: 172;
+        y: 100;
+        color: Color.white;
+    }
+
     enter {
         // Write "BOUNCE" at center
         byte i = 0;
@@ -44,9 +73,6 @@ entry scene Title {
             poke: 0x05F1 + i value: titleText[i];
             i += 1;
         }
-
-        // Show sprite bouncing on title screen
-        setupBallSprite:;
     }
 
     Ball ball;
@@ -54,19 +80,13 @@ entry scene Title {
     frame {
         ball update:;
 
-        // Update sprite position
+        // Update sprite position from struct
         poke: 0xD000 value: ball.x;
         poke: 0xD001 value: ball.y;
 
         if (joystick.port2.fire) {
             go Game;
         }
-    }
-
-    setupBallSprite: {
-        poke: 0x07F8 value: spritePtr;
-        poke: 0xD015 value: 1;
-        poke: 0xD027 value: 1;
     }
 }
 
@@ -76,17 +96,41 @@ scene Game {
         background: Color.black;
     }
 
+    sprite 0 gameBall {
+        data: `
+            . . . . . . . . . # # # # # # . . . . . . . . .
+            . . . . . . . # # # # # # # # # # . . . . . . .
+            . . . . . # # # # # # # # # # # # # # . . . . .
+            . . . . # # # # # # # # # # # # # # # # . . . .
+            . . . # # # # # # # # # # # # # # # # # # . . .
+            . . # # # # # # # # # # # # # # # # # # # # . .
+            . . # # # # # # # # # # # # # # # # # # # # . .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . . # # # # # # # # # # # # # # # # # # # # . .
+            . . # # # # # # # # # # # # # # # # # # # # . .
+            . . . # # # # # # # # # # # # # # # # # # . . .
+            . . . . # # # # # # # # # # # # # # # # . . . .
+            . . . . . # # # # # # # # # # # # # # . . . . .
+            . . . . . . . # # # # # # # # # # . . . . . . .
+            . . . . . . . . . # # # # # # . . . . . . . . .
+            . . . . . . . . . . . . . . . . . . . . . . . .
+            . . . . . . . . . . . . . . . . . . . . . . . .
+        `;
+        x: 172;
+        y: 100;
+        color: Color.white;
+    }
+
     Ball ball;
     byte playerPos = 120;
 
     enter {
         clearScreen:;
         score = 0;
-
-        // Set up sprite for ball
-        poke: 0x07F8 value: spritePtr;
-        poke: 0xD015 value: 1;
-        poke: 0xD027 value: 1;
     }
 
     frame {
@@ -122,31 +166,3 @@ scene Game {
 
 // "BOUNCE" in screen codes
 const byte[6] titleText = { 2, 15, 21, 14, 3, 5 };
-
-// Sprite pointer (address / 64)
-const byte spritePtr = 13;
-
-// Ball sprite pattern (24x21)
-const byte[63] spriteData = {
-    0x00, 0x7E, 0x00,
-    0x01, 0xFF, 0x80,
-    0x07, 0xFF, 0xE0,
-    0x0F, 0xFF, 0xF0,
-    0x1F, 0xFF, 0xF8,
-    0x3F, 0xFF, 0xFC,
-    0x3F, 0xFF, 0xFC,
-    0x7F, 0xFF, 0xFE,
-    0x7F, 0xFF, 0xFE,
-    0x7F, 0xFF, 0xFE,
-    0x7F, 0xFF, 0xFE,
-    0x7F, 0xFF, 0xFE,
-    0x3F, 0xFF, 0xFC,
-    0x3F, 0xFF, 0xFC,
-    0x1F, 0xFF, 0xF8,
-    0x0F, 0xFF, 0xF0,
-    0x07, 0xFF, 0xE0,
-    0x01, 0xFF, 0x80,
-    0x00, 0x7E, 0x00,
-    0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00
-};
