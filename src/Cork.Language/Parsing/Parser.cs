@@ -257,6 +257,8 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
         var size = sizeExpr is IntLiteralExpr intLit
             ? (int)intLit.Value
             : throw Error("Array size must be an integer literal");
+        if (size > 256)
+            throw Error($"Array size {size} exceeds maximum of 256 (8-bit index register limit)");
         Expect(TokenKind.CloseBracket, "]");
         var name = Expect(TokenKind.Identifier, "name").Text;
         Expect(TokenKind.Equal, "=");
@@ -457,6 +459,8 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
             arraySize = sizeExpr is IntLiteralExpr intLit
                 ? (int)intLit.Value
                 : throw Error("Array size must be an integer literal");
+            if (arraySize > 256)
+                throw Error($"Array size {arraySize} exceeds maximum of 256 (8-bit index register limit)");
             Expect(TokenKind.CloseBracket, "]");
         }
 
