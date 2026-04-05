@@ -291,22 +291,28 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             ctx.Buffer.EmitStaAbsolute((ushort)constAddr.Value);
         }
         // poke: wordVar value: val — indirect indexed via ($FB),Y
+        // Evaluate value FIRST to avoid $FB/$FC clobber (e.g. nested peek of word var)
         else if (addressExpr is IdentifierExpr addrIdent && ctx.Symbols.IsWordVar(addrIdent.Name))
         {
             var zp = ctx.Symbols.GetLocal(addrIdent.Name);
+            ctx.Expressions.EmitExprToA(valueExpr);
+            ctx.Buffer.EmitPha();
             ctx.Buffer.EmitLdaZeroPage(zp);
             ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
             ctx.Buffer.EmitLdaZeroPage((byte)(zp + 1));
             ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
-            ctx.Expressions.EmitExprToA(valueExpr);
+            ctx.Buffer.EmitPla();
             ctx.Buffer.EmitLdyImmediate(0);
             ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
         }
         // poke: (wordVar + offset) value: val — compute address, use indirect
+        // Evaluate value FIRST to avoid $FB/$FC clobber (e.g. nested peek of word var)
         else if (addressExpr is BinaryExpr { Op: Language.Lexing.TokenKind.Plus } wordAdd &&
                  wordAdd.Left is IdentifierExpr wordBase && ctx.Symbols.IsWordVar(wordBase.Name))
         {
             var zp = ctx.Symbols.GetLocal(wordBase.Name);
+            ctx.Expressions.EmitExprToA(valueExpr);
+            ctx.Buffer.EmitPha();
             // Load word address + offset into pointer
             ctx.Expressions.EmitExprToA(wordAdd.Right);
             ctx.Buffer.EmitClc();
@@ -315,7 +321,7 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             ctx.Buffer.EmitLdaZeroPage((byte)(zp + 1));
             ctx.Buffer.EmitAdcImmediate(0);
             ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
-            ctx.Expressions.EmitExprToA(valueExpr);
+            ctx.Buffer.EmitPla();
             ctx.Buffer.EmitLdyImmediate(0);
             ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
         }

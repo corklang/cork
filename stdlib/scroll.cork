@@ -14,6 +14,21 @@
 //   }
 //   setScrollX: scrollX;
 
+// Enable 38-column mode (hides columns 0 and 39 behind border)
+// Required for clean horizontal scrolling without edge artifacts.
+enable38Columns: {
+    byte reg = (peek: 0xD016);
+    reg &= 0xF7;
+    poke: 0xD016 value: reg;
+}
+
+// Restore 40-column mode (default)
+disable38Columns: {
+    byte reg = (peek: 0xD016);
+    reg |= 0x08;
+    poke: 0xD016 value: reg;
+}
+
 // Set horizontal fine scroll (0-7)
 setScrollX: (byte scroll) {
     // Read $D016, preserve bits 3-7, replace bits 0-2

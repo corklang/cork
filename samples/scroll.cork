@@ -1,0 +1,41 @@
+// Smooth horizontal text scroller
+import "../stdlib/screen.cork";
+import "../stdlib/scroll.cork";
+
+entry scene Scroller {
+    hardware {
+        border: Color.black;
+        background: Color.blue;
+    }
+
+    string message = "WELCOME TO CORK! * A PROGRAMMING LANGUAGE FOR THE COMMODORE 64 * SMOOTH SCROLLING DEMO *     ";
+    byte scrollX = 7;
+    byte msgPos = 0;
+
+    enter {
+        clearScreen:;
+        enable38Columns:;
+    }
+
+    frame {
+        scrollX -= 1;
+        if (scrollX > 7) {
+            scrollX = 7;
+            // Shift only row 12 left by one character (fast constant+offset addressing)
+            byte col = 0;
+            while (col < 39) {
+                poke: 0x05E0 + col value: (peek: 0x05E1 + col);
+                poke: 0xD9E0 + col value: (peek: 0xD9E1 + col);
+                col += 1;
+            }
+            // Feed next message character into rightmost column
+            poke: 0x0607 value: message[msgPos];
+            poke: 0xDA07 value: 1;
+            msgPos += 1;
+            if (msgPos >= message.length) {
+                msgPos = 0;
+            }
+        }
+        setScrollX: scrollX;
+    }
+}
