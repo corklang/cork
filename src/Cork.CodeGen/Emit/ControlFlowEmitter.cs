@@ -349,6 +349,12 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             wordBin.Left is IdentifierExpr wordIdent &&
             ctx.Symbols.IsWordVar(wordIdent.Name))
         {
+            // Word vs word variable comparison
+            if (wordBin.Right is IdentifierExpr wordRight && ctx.Symbols.IsWordVar(wordRight.Name))
+            {
+                EmitWordVarComparisonBranchTrue(wordIdent.Name, wordBin.Op, wordRight.Name, skipBytes);
+                return;
+            }
             var litVal = ExpressionEmitter.Resolve16BitInitializer("", wordBin.Right);
             EmitWordComparisonBranchTrue(wordIdent.Name, wordBin.Op, litVal, skipBytes);
             return;
@@ -574,6 +580,82 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
                 ctx.Buffer.EmitLdaZeroPage(zp);
                 ctx.Buffer.EmitCmpImmediate(immLo);
                 ctx.Buffer.EmitBcs((sbyte)skipBytes);
+                break;
+
+            default:
+                throw new InvalidOperationException($"Unsupported word comparison: {op}");
+        }
+    }
+
+    /// <summary>
+    /// Emit 16-bit comparison between two word variables.
+    /// Same logic as literal version but uses CMP zp instead of CMP #imm.
+    /// </summary>
+    public void EmitWordVarComparisonBranchTrue(string leftName, TokenKind op, string rightName, int skipBytes)
+    {
+        var lZp = ctx.Symbols.GetLocal(leftName);
+        var lHi = (byte)(lZp + 1);
+        var rZp = ctx.Symbols.GetLocal(rightName);
+        var rHi = (byte)(rZp + 1);
+
+        switch (op)
+        {
+            case TokenKind.Less: // left < right
+                ctx.Buffer.EmitLdaZeroPage(lHi);
+                ctx.Buffer.EmitCmpZeroPage(rHi);
+                ctx.Buffer.EmitBcc((sbyte)(8 + skipBytes));
+                ctx.Buffer.EmitBne(6);
+                ctx.Buffer.EmitLdaZeroPage(lZp);
+                ctx.Buffer.EmitCmpZeroPage(rZp);
+                ctx.Buffer.EmitBcc((sbyte)skipBytes);
+                break;
+
+            case TokenKind.Greater: // left > right → right < left
+                ctx.Buffer.EmitLdaZeroPage(rHi);
+                ctx.Buffer.EmitCmpZeroPage(lHi);
+                ctx.Buffer.EmitBcc((sbyte)(8 + skipBytes));
+                ctx.Buffer.EmitBne(6);
+                ctx.Buffer.EmitLdaZeroPage(rZp);
+                ctx.Buffer.EmitCmpZeroPage(lZp);
+                ctx.Buffer.EmitBcc((sbyte)skipBytes);
+                break;
+
+            case TokenKind.LessEqual: // left <= right → !(right < left) → right >= left
+                ctx.Buffer.EmitLdaZeroPage(lHi);
+                ctx.Buffer.EmitCmpZeroPage(rHi);
+                ctx.Buffer.EmitBcc((sbyte)(8 + skipBytes));
+                ctx.Buffer.EmitBne(6);
+                ctx.Buffer.EmitLdaZeroPage(rZp);
+                ctx.Buffer.EmitCmpZeroPage(lZp);
+                ctx.Buffer.EmitBcs((sbyte)skipBytes);
+                break;
+
+            case TokenKind.GreaterEqual: // left >= right
+                ctx.Buffer.EmitLdaZeroPage(rHi);
+                ctx.Buffer.EmitCmpZeroPage(lHi);
+                ctx.Buffer.EmitBcc((sbyte)(8 + skipBytes));
+                ctx.Buffer.EmitBne(6);
+                ctx.Buffer.EmitLdaZeroPage(lZp);
+                ctx.Buffer.EmitCmpZeroPage(rZp);
+                ctx.Buffer.EmitBcs((sbyte)skipBytes);
+                break;
+
+            case TokenKind.EqualEqual:
+                ctx.Buffer.EmitLdaZeroPage(lZp);
+                ctx.Buffer.EmitCmpZeroPage(rZp);
+                ctx.Buffer.EmitBne(4);
+                ctx.Buffer.EmitLdaZeroPage(lHi);
+                ctx.Buffer.EmitCmpZeroPage(rHi);
+                ctx.Buffer.EmitBeq((sbyte)skipBytes);
+                break;
+
+            case TokenKind.BangEqual:
+                ctx.Buffer.EmitLdaZeroPage(lZp);
+                ctx.Buffer.EmitCmpZeroPage(rZp);
+                ctx.Buffer.EmitBne((sbyte)(4 + skipBytes));
+                ctx.Buffer.EmitLdaZeroPage(lHi);
+                ctx.Buffer.EmitCmpZeroPage(rHi);
+                ctx.Buffer.EmitBne((sbyte)skipBytes);
                 break;
 
             default:
