@@ -55,6 +55,11 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically compile .cork files on save and show diagnostics."
+        },
+        "cork.vicePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the VICE x64sc emulator. If empty, auto-detects from common locations and PATH."
         }
       }
     },
@@ -92,6 +97,10 @@
       {
         "command": "cork.build",
         "title": "Cork: Build Current File"
+      },
+      {
+        "command": "cork.runInVice",
+        "title": "Cork: Run in VICE"
       }
     ]
   },

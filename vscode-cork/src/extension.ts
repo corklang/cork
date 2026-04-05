@@ -4,6 +4,8 @@ import { CorkTaskProvider } from "./taskProvider";
 import { CorkCompletionProvider } from "./completionProvider";
 import { CorkHoverProvider } from "./hoverProvider";
 import { CorkFormattingProvider } from "./formatProvider";
+import { SpritePreviewProvider, SpriteHoverProvider, SpritePreviewPanelManager } from "./spritePreview";
+import { registerViceCommands } from "./viceIntegration";
 
 const CORK_SELECTOR: vscode.DocumentSelector = { language: "cork", scheme: "file" };
 
@@ -34,6 +36,24 @@ export function activate(context: vscode.ExtensionContext) {
       new CorkFormattingProvider()
     )
   );
+
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(
+      CORK_SELECTOR,
+      new SpritePreviewProvider()
+    )
+  );
+
+  const spritePanelManager = new SpritePreviewPanelManager();
+  context.subscriptions.push({ dispose: () => spritePanelManager.dispose() });
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cork.previewSprite", (docUri: string, startLine: number) => {
+      spritePanelManager.open(docUri, startLine);
+    })
+  );
+
+  registerViceCommands(context);
 
   context.subscriptions.push(
     vscode.commands.registerCommand("cork.build", () => {
