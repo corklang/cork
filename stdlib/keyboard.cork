@@ -47,6 +47,8 @@ byte getKey: {
     byte _col = 0;
     while (_col < 8) {
         poke: 0xDC00 value: _kbdCols[_col];
+        // CIA matrix settling: dummy read before real read
+        byte _settle = (peek: 0xDC01);
         byte _rows = (peek: 0xDC01);
         if (_rows != 0xFF) {
             byte _row = 0;

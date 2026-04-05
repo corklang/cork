@@ -339,6 +339,11 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             // Select keyboard matrix column via CIA1 Port A
             ctx.Buffer.EmitLdaImmediate(colSelect);
             ctx.Buffer.EmitStaAbsolute(0xDC00);
+            // Settling time: CIA needs ~8μs for keyboard matrix lines to stabilize
+            ctx.Buffer.EmitNop();
+            ctx.Buffer.EmitNop();
+            ctx.Buffer.EmitNop();
+            ctx.Buffer.EmitNop();
             // Read row bits from CIA1 Port B (active low: 0 = pressed)
             ctx.Buffer.EmitLdaAbsolute(0xDC01);
             ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(rowMask); // AND #rowMask
