@@ -22,9 +22,7 @@ entry scene Scroller {
         if (scrollX > 7) {
             scrollX = 7;
             shiftRowLeft: 12;
-            // Feed next message character into rightmost column
-            poke: 0x0607 value: message[msgPos];
-            poke: 0xDA07 value: 1;
+            setChar: 12 col: 39 char: message[msgPos] color: 1;
             msgPos += 1;
             if (msgPos >= message.length) {
                 msgPos = 0;

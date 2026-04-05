@@ -41,6 +41,13 @@ fillColor: (byte _col) {
     }
 }
 
+// Set a character at row, column
+setChar: (byte _row) col: (byte _col) char: (byte _ch) {
+    word _pos = _row * 40;
+    _pos += _col;
+    poke: (0x0400 + _pos) value: _ch;
+}
+
 // Set a character at row, column with color
 setChar: (byte _row) col: (byte _col) char: (byte _ch) color: (byte _clr) {
     word _pos = _row * 40;

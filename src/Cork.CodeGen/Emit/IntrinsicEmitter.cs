@@ -232,10 +232,27 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
         if (addressExpr is BinaryExpr { Op: Language.Lexing.TokenKind.Plus } addExpr &&
             addExpr.Left is IntLiteralExpr baseAddr)
         {
-            // peek: (constant + expr) → LDA base,X
-            ctx.Expressions.EmitExprToA(addExpr.Right);
-            ctx.Buffer.EmitTax();
-            ctx.Buffer.EmitLdaAbsoluteX((ushort)baseAddr.Value);
+            if (addExpr.Right is IdentifierExpr peekOffsetId && ctx.Symbols.IsWordVar(peekOffsetId.Name))
+            {
+                // peek: (constant + wordVar) → compute 16-bit address into $FB/$FC
+                var zp = ctx.Symbols.GetLocal(peekOffsetId.Name);
+                ctx.Buffer.EmitLdaZeroPage(zp);
+                ctx.Buffer.EmitClc();
+                ctx.Buffer.EmitAdcImmediate((byte)(baseAddr.Value & 0xFF));
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
+                ctx.Buffer.EmitLdaZeroPage((byte)(zp + 1));
+                ctx.Buffer.EmitAdcImmediate((byte)((baseAddr.Value >> 8) & 0xFF));
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
+                ctx.Buffer.EmitLdyImmediate(0);
+                ctx.Buffer.EmitLdaIndirectY(EmitContext.ZpPointerLo);
+            }
+            else
+            {
+                // peek: (constant + byteExpr) → LDA base,X
+                ctx.Expressions.EmitExprToA(addExpr.Right);
+                ctx.Buffer.EmitTax();
+                ctx.Buffer.EmitLdaAbsoluteX((ushort)baseAddr.Value);
+            }
         }
         else if (addressExpr is IntLiteralExpr constAddr)
         {
@@ -280,10 +297,31 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
         if (addressExpr is BinaryExpr { Op: Language.Lexing.TokenKind.Plus } addExpr &&
             addExpr.Left is IntLiteralExpr baseAddr)
         {
-            ctx.Expressions.EmitExprToA(addExpr.Right);
-            ctx.Buffer.EmitTax();
-            ctx.Expressions.EmitExprToA(valueExpr);
-            ctx.Buffer.EmitStaAbsoluteX((ushort)baseAddr.Value);
+            if (addExpr.Right is IdentifierExpr pokeOffsetId && ctx.Symbols.IsWordVar(pokeOffsetId.Name))
+            {
+                // poke: (constant + wordVar) → compute 16-bit address into $FB/$FC
+                var zp = ctx.Symbols.GetLocal(pokeOffsetId.Name);
+                ctx.Expressions.EmitExprToA(valueExpr);
+                ctx.Buffer.EmitPha();
+                ctx.Buffer.EmitLdaZeroPage(zp);
+                ctx.Buffer.EmitClc();
+                ctx.Buffer.EmitAdcImmediate((byte)(baseAddr.Value & 0xFF));
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
+                ctx.Buffer.EmitLdaZeroPage((byte)(zp + 1));
+                ctx.Buffer.EmitAdcImmediate((byte)((baseAddr.Value >> 8) & 0xFF));
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
+                ctx.Buffer.EmitPla();
+                ctx.Buffer.EmitLdyImmediate(0);
+                ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
+            }
+            else
+            {
+                // poke: (constant + byteExpr) → STA base,X
+                ctx.Expressions.EmitExprToA(addExpr.Right);
+                ctx.Buffer.EmitTax();
+                ctx.Expressions.EmitExprToA(valueExpr);
+                ctx.Buffer.EmitStaAbsoluteX((ushort)baseAddr.Value);
+            }
         }
         else if (addressExpr is IntLiteralExpr constAddr)
         {
