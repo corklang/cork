@@ -64,7 +64,8 @@ scene TypeDemo {
         // Matrix-scanned getKey for text input (no KERNAL needed)
         byte key = (getKey:);
         if (key != 0) {
-            poke: 0x0400 + pos value: key;
+            byte sc = (toScreenCode: key);
+            poke: 0x0400 + pos value: sc;
             pos += 1;
             if (pos > 199) { pos = 80; }
         }

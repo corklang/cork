@@ -84,6 +84,17 @@ byte waitForKey: {
     return _key;
 }
 
+// Convert a PETSCII code to a C64 screen code for display.
+// Covers letters (A-Z), digits, space, and common punctuation.
+byte toScreenCode: (byte _pet) {
+    // A-Z uppercase: PETSCII 65-90 → screen 1-26
+    if (_pet >= 65) { if (_pet <= 90) { return _pet - 64; } }
+    // @ symbol: PETSCII 64 → screen 0
+    if (_pet == 64) { return 0; }
+    // Everything else (digits, space, punctuation): same value
+    return _pet;
+}
+
 // Check if any key is currently pressed (direct scan).
 byte anyKeyPressed: {
     poke: 0xDC00 value: 0;
