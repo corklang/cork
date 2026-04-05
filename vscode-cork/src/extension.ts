@@ -6,6 +6,11 @@ import { CorkHoverProvider } from "./hoverProvider";
 import { CorkFormattingProvider } from "./formatProvider";
 import { SpritePreviewProvider, SpriteHoverProvider, SpritePreviewPanelManager } from "./spritePreview";
 import { registerViceCommands } from "./viceIntegration";
+import { CorkDocumentSymbolProvider } from "./outlineProvider";
+import { CorkDefinitionProvider } from "./definitionProvider";
+import { CorkReferenceProvider } from "./referenceProvider";
+import { CorkRenameProvider } from "./renameProvider";
+import { CorkColorProvider } from "./colorProvider";
 
 const CORK_SELECTOR: vscode.DocumentSelector = { language: "cork", scheme: "file" };
 
@@ -51,6 +56,26 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("cork.previewSprite", (docUri: string, startLine: number) => {
       spritePanelManager.open(docUri, startLine);
     })
+  );
+
+  context.subscriptions.push(
+    vscode.languages.registerDocumentSymbolProvider(CORK_SELECTOR, new CorkDocumentSymbolProvider())
+  );
+
+  context.subscriptions.push(
+    vscode.languages.registerDefinitionProvider(CORK_SELECTOR, new CorkDefinitionProvider())
+  );
+
+  context.subscriptions.push(
+    vscode.languages.registerReferenceProvider(CORK_SELECTOR, new CorkReferenceProvider())
+  );
+
+  context.subscriptions.push(
+    vscode.languages.registerRenameProvider(CORK_SELECTOR, new CorkRenameProvider())
+  );
+
+  context.subscriptions.push(
+    vscode.languages.registerColorProvider(CORK_SELECTOR, new CorkColorProvider())
   );
 
   registerViceCommands(context);
