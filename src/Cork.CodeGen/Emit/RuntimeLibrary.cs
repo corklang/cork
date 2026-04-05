@@ -18,6 +18,7 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         EmitFixedDivide();
         EmitSignedFixedDivide();
         EmitDebugRoutines();
+        EmitPlotPixelRoutine();
     }
 
     private void EmitMultiplyRoutines()
@@ -415,5 +416,89 @@ public sealed class RuntimeLibrary(EmitContext ctx)
             ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedResB2);
 
         ctx.Buffer.EmitRts();
+    }
+
+    private void EmitPlotPixelRoutine()
+    {
+        if (!ctx.Runtime.Contains("plotPixel")) return;
+
+        // Input: $F0 = x_lo, $F1 = x_hi, $0F = y
+        // Uses: $FB/$FC as pointer, trashes A/X/Y
+        // Split tables: rowTableLo/Hi[25] indexed by charRow, bitTable[8]
+
+        // _rt_plotPixel: set pixel (ORA)
+        ctx.Buffer.DefineLabel("_rt_plotPixel");
+        ctx.Buffer.EmitClc(); // carry clear = set mode
+        ctx.Buffer.EmitBcc(1); // skip SEC (always taken)
+
+        // _rt_clearPixel: clear pixel (AND ~mask)
+        ctx.Buffer.DefineLabel("_rt_clearPixel");
+        ctx.Buffer.EmitSec(); // carry set = clear mode
+
+        // Shared body
+        ctx.Buffer.EmitByte(0x08); // PHP — save set/clear flag
+
+        // charRow = y >> 3
+        ctx.Buffer.EmitLdaZeroPage(0x0F);
+        ctx.Buffer.EmitByte(0x4A); // LSR A
+        ctx.Buffer.EmitByte(0x4A); // LSR A
+        ctx.Buffer.EmitByte(0x4A); // LSR A → charRow (0-24)
+        ctx.Buffer.EmitTax();
+
+        // Row base address from split tables
+        ctx.Buffer.EmitLdaAbsoluteXForward("_rt_plotRowLo");
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
+        ctx.Buffer.EmitLdaAbsoluteXForward("_rt_plotRowHi");
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
+
+        // Add (x & ~7) — character column offset
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulA); // x_lo
+        ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(0xF8); // AND #$F8
+        ctx.Buffer.EmitClc();
+        ctx.Buffer.EmitAdcZeroPage(EmitContext.ZpPointerLo);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulB); // x_hi
+        ctx.Buffer.EmitAdcZeroPage(EmitContext.ZpPointerHi);
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
+
+        // pixelRow = y & 7 → Y register
+        ctx.Buffer.EmitLdaZeroPage(0x0F);
+        ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(0x07); // AND #$07
+        ctx.Buffer.EmitTay();
+
+        // Bit mask from x & 7
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulA); // x_lo
+        ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(0x07); // AND #$07
+        ctx.Buffer.EmitTax();
+        ctx.Buffer.EmitLdaAbsoluteXForward("_rt_plotBitTable");
+
+        // Set or clear based on saved carry flag
+        ctx.Buffer.EmitByte(0x28); // PLP
+        var clearLabel = ctx.NextLabel("_plotclr");
+        ctx.Buffer.EmitBcs(7); // BCS → clear path (ORA+STA+RTS = 7 bytes ahead)
+
+        // Set pixel: ORA existing byte
+        ctx.Buffer.EmitByte(0x11); ctx.Buffer.EmitByte(EmitContext.ZpPointerLo); // ORA ($FB),Y
+        ctx.Buffer.EmitByte(0x91); ctx.Buffer.EmitByte(EmitContext.ZpPointerLo); // STA ($FB),Y
+        ctx.Buffer.EmitRts();
+
+        // Clear pixel: invert mask, AND existing byte
+        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF); // EOR #$FF
+        ctx.Buffer.EmitByte(0x31); ctx.Buffer.EmitByte(EmitContext.ZpPointerLo); // AND ($FB),Y
+        ctx.Buffer.EmitByte(0x91); ctx.Buffer.EmitByte(EmitContext.ZpPointerLo); // STA ($FB),Y
+        ctx.Buffer.EmitRts();
+
+        // Row address tables (25 entries each, split lo/hi)
+        // Row N address = $2000 + N * 320
+        ctx.Buffer.DefineLabel("_rt_plotRowLo");
+        for (var row = 0; row < 25; row++)
+            ctx.Buffer.EmitByte((byte)((0x2000 + row * 320) & 0xFF));
+        ctx.Buffer.DefineLabel("_rt_plotRowHi");
+        for (var row = 0; row < 25; row++)
+            ctx.Buffer.EmitByte((byte)((0x2000 + row * 320) >> 8));
+
+        // Bit mask table (8 entries: bit 7 down to bit 0)
+        ctx.Buffer.DefineLabel("_rt_plotBitTable");
+        ctx.Buffer.EmitBytes([0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01]);
     }
 }

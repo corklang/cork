@@ -8,9 +8,6 @@
 // Cells left-to-right, top-to-bottom. Within a cell, bytes are rows 0-7.
 // Address = $2000 + (charRow * 40 + charCol) * 8 + pixelRow
 
-// Bit masks for pixel positions 0-7 (bit 7 = leftmost)
-const byte[8] pixelBits = { 128, 64, 32, 16, 8, 4, 2, 1 };
-
 // Clear the bitmap (8000 bytes at $2000)
 clearBitmap: {
     word addr = 0x2000;
@@ -39,64 +36,10 @@ setBitmapColors: (byte fg) bg: (byte bg) {
     }
 }
 
-// Plot a pixel in standard bitmap mode (320x200)
+// plotPixel: x y: y — set pixel (320x200 bitmap mode)
+// clearPixel: x y: y — clear pixel
+// Both are compiler intrinsics (~100 cycles vs ~1000+ as Cork methods).
 // x: 0-319 (word), y: 0-199 (byte)
-plotPixel: (word x) y: (byte y) {
-    byte charRow = y >> 3;
-    byte pixelRow = y & 7;
-
-    // cellOffset = charRow * 320 + (x & ~7) + pixelRow
-    // charRow * 320 = charRow * 256 + charRow * 64
-    // Use word arithmetic to avoid byte overflow
-    word cellOffset = 0;
-    cellOffset += charRow;
-    cellOffset <<= 6;       // charRow * 64
-    word hiPart = 0;
-    hiPart += charRow;
-    hiPart <<= 8;           // charRow * 256
-    cellOffset += hiPart;   // charRow * 320
-
-    // Add x with low 3 bits cleared (= charCol * 8)
-    word xAligned = x;
-    xAligned &= 0xFFF8;
-    cellOffset += xAligned;
-    cellOffset += pixelRow;
-    word addr = 0x2000;
-    addr += cellOffset;
-
-    // Bit mask from lookup table (x & 7 fits in byte)
-    byte bitPos = x as byte;
-    bitPos &= 7;
-    byte mask = pixelBits[bitPos];
-
-    // Read-modify-write
-    byte current = (peek: addr);
-    poke: addr value: (current | mask);
-}
-
-// Clear a pixel in standard bitmap mode
-clearPixel: (word x) y: (byte y) {
-    byte charRow = y >> 3;
-    byte pixelRow = y & 7;
-    word cellOffset = 0;
-    cellOffset += charRow;
-    cellOffset <<= 6;
-    word hiPart = 0;
-    hiPart += charRow;
-    hiPart <<= 8;
-    cellOffset += hiPart;
-    word xAligned = x;
-    xAligned &= 0xFFF8;
-    cellOffset += xAligned;
-    cellOffset += pixelRow;
-    word addr = 0x2000;
-    addr += cellOffset;
-    byte bitPos = x as byte;
-    bitPos &= 7;
-    byte mask = pixelBits[bitPos] ^ 0xFF;
-    byte current = (peek: addr);
-    poke: addr value: (current & mask);
-}
 
 // Draw a horizontal line in bitmap mode (fast: fills whole bytes)
 // x1 and x2 should be byte-aligned (multiples of 8) for best speed

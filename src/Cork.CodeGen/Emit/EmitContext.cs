@@ -103,6 +103,9 @@ public sealed class EmitContext
 
     public int InlineDataSize => _inlineData.Sum(d => d.Data.Length);
 
+    // Current scene's graphics mode (set during hardware block emission)
+    public bool IsBitmapMode { get; set; }
+
     // Sprite VIC-II registers dirtied by the current scene (cleared on go)
     public HashSet<ushort> DirtySpriteRegs { get; } = [];
 

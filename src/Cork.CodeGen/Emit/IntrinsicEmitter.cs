@@ -59,6 +59,30 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             return;
         }
 
+        // Built-in intrinsic: plotPixel: x y: y — set pixel in bitmap mode
+        if (msgSend.Receiver == null && msgSend.Segments.Count == 2 &&
+            msgSend.Segments[0].Name == "plotPixel" && msgSend.Segments[1].Name == "y")
+        {
+            if (!ctx.IsBitmapMode)
+                throw new CompileError("plotPixel requires bitmap mode (hardware { mode: bitmap; })",
+                    msgSend.Location);
+            ctx.Runtime.Add("plotPixel");
+            EmitPlotPixelCall(msgSend.Segments[0].Argument!, msgSend.Segments[1].Argument!, setPixel: true);
+            return;
+        }
+
+        // Built-in intrinsic: clearPixel: x y: y — clear pixel in bitmap mode
+        if (msgSend.Receiver == null && msgSend.Segments.Count == 2 &&
+            msgSend.Segments[0].Name == "clearPixel" && msgSend.Segments[1].Name == "y")
+        {
+            if (!ctx.IsBitmapMode)
+                throw new CompileError("clearPixel requires bitmap mode (hardware { mode: bitmap; })",
+                    msgSend.Location);
+            ctx.Runtime.Add("plotPixel");
+            EmitPlotPixelCall(msgSend.Segments[0].Argument!, msgSend.Segments[1].Argument!, setPixel: false);
+            return;
+        }
+
         // Scene method call (no receiver)
         if (msgSend.Receiver == null && msgSend.Segments.Count > 0)
         {
@@ -419,4 +443,40 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
         ctx.Buffer.EmitJsrForward("_rt_debughex");
     }
 
+    /// <summary>
+    /// Setup args and JSR to plotPixel/clearPixel runtime routine.
+    /// Args: $F0=x_lo, $F1=x_hi, $0F=y. ~100 cycles total.
+    /// </summary>
+    private void EmitPlotPixelCall(ExprNode xExpr, ExprNode yExpr, bool setPixel)
+    {
+        // Evaluate y (byte) → $0F
+        ctx.Expressions.EmitExprToA(yExpr);
+        ctx.Buffer.EmitStaZeroPage(0x0F);
+
+        // Evaluate x → $F0/$F1
+        if (xExpr is IdentifierExpr xIdent && ctx.Symbols.IsWordVar(xIdent.Name))
+        {
+            var xZp = ctx.Symbols.GetLocal(xIdent.Name);
+            ctx.Buffer.EmitLdaZeroPage(xZp);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);
+            ctx.Buffer.EmitLdaZeroPage((byte)(xZp + 1));
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);
+        }
+        else if (ctx.Expressions.TryFoldConstant(xExpr, out var xConst))
+        {
+            ctx.Buffer.EmitLdaImmediate((byte)(xConst & 0xFF));
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);
+            ctx.Buffer.EmitLdaImmediate((byte)(xConst >> 8));
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);
+        }
+        else
+        {
+            ctx.Expressions.EmitExprToA(xExpr);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);
+            ctx.Buffer.EmitLdaImmediate(0);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);
+        }
+
+        ctx.Buffer.EmitJsrForward(setPixel ? "_rt_plotPixel" : "_rt_clearPixel");
+    }
 }

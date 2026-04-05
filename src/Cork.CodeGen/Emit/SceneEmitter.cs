@@ -14,6 +14,7 @@ public sealed class SceneEmitter(EmitContext ctx)
     {
         ctx.Symbols.ResetForScene();
         ctx.DirtySpriteRegs.Clear();
+        ctx.IsBitmapMode = false;
         _currentSceneName = scene.Name;
 
         ctx.Buffer.DefineLabel($"_scene_{scene.Name}");
@@ -131,6 +132,8 @@ public sealed class SceneEmitter(EmitContext ctx)
         // $D016: base $08 (CSEL=1, XSCROLL=0), modify bit 4
         // $D018: $15 = screen at $0400, chars at $1000 (text default)
         //        $1D = screen at $0400, bitmap at $2000
+        ctx.IsBitmapMode = modeIdent.Name is "bitmap" or "multicolorBitmap";
+
         var (d011, d016, d018) = modeIdent.Name switch
         {
             "text"             => ((byte)0x1B, (byte)0x08, (byte)0x15),

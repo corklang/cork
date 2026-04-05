@@ -247,6 +247,20 @@ public sealed class AssemblyBuffer(ushort baseAddress)
         }
     }
 
+    /// <summary>
+    /// Emit LDA abs,X with a forward label reference (for table lookups).
+    /// </summary>
+    public void EmitLdaAbsoluteXForward(string label, int offset = 0)
+    {
+        EmitByte(0xBD); // LDA abs,X
+        if (offset == 0)
+            _fixups.Add((_bytes.Count, label, FixupKind.Word));
+        else
+            _fixups.Add((_bytes.Count, label, FixupKind.Word)); // will be adjusted below
+        EmitWord((ushort)offset); // placeholder (offset added during resolution)
+        ResetPeephole();
+    }
+
     public ushort GetLabel(string name) =>
         _labels.TryGetValue(name, out var addr) ? addr : throw new InvalidOperationException($"Undefined label: {name}");
 

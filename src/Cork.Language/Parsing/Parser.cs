@@ -67,9 +67,17 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
         if (Check(TokenKind.ConstKw))
             return ParseConstDecl();
 
-        // Global method: name: { ... } or returnType name: (params) { ... }
+        // Global method: name: { ... } or name: (type param) ... { ... }
+        // Reject calls at global scope (name:; or name: expr)
         if (Check(TokenKind.Identifier) && PeekIs(1, TokenKind.Colon))
+        {
+            if (PeekIs(2, TokenKind.Semicolon) ||
+                PeekIs(2, TokenKind.IntegerLiteral) || PeekIs(2, TokenKind.StringLiteral) ||
+                PeekIs(2, TokenKind.FixedLiteral) || PeekIs(2, TokenKind.TrueLiteral) ||
+                PeekIs(2, TokenKind.FalseLiteral))
+                throw Error("Method calls are not allowed at global scope (only inside scene blocks)");
             return ParseGlobalMethod();
+        }
         if (IsTypeKeyword(Current.Kind) && PeekIs(1, TokenKind.Identifier) && PeekIs(2, TokenKind.Colon))
             return ParseGlobalMethod();
 
