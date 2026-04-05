@@ -13,8 +13,8 @@ entry scene Demo {
 
     word ballX = 160;
     byte ballY = 100;
-    byte dx = 2;
-    byte dy = 1;
+    byte goRight = 1;
+    byte goDown = 1;
     byte tick = 0;
 
     enter {
@@ -76,13 +76,13 @@ entry scene Demo {
         byte by0 = ballY - 1;
         clearPixel: ballX y: by0;
 
-        // Move ball
-        ballX += dx;
-        ballY += dy;
-        if (ballX > 310) { dx = 254; }
-        if (ballX < 10)  { dx = 2; }
-        if (ballY > 190) { dy = 255; }
-        if (ballY < 10)  { dy = 1; }
+        // Move ball (use direction flags — byte +=254 on a word doesn't wrap)
+        if (goRight == 1) { ballX += 2; } else { ballX -= 2; }
+        if (goDown == 1)  { ballY += 1; } else { ballY -= 1; }
+        if (ballX > 310) { goRight = 0; }
+        if (ballX < 10)  { goRight = 1; }
+        if (ballY > 190) { goDown = 0; }
+        if (ballY < 10)  { goDown = 1; }
 
         // Draw new ball (3x3 cross)
         plotPixel: ballX y: ballY;
