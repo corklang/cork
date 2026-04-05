@@ -62,7 +62,7 @@ entry scene Demo {
         computeCursor:;
 
         // Draw cursor
-        poke: cursorScreen value: 81;
+        poke: cursorScreen value: 160;
         poke: cursorColor value: color;
         poke: 0xD020 value: color;
     }
