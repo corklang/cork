@@ -117,21 +117,20 @@ public class KeyboardTests
         ctx.ControlFlow.EmitConditionBranchTrue(condition, 3);
 
         var bytes = ctx.Buffer.ToArray();
-        // Should emit: LDA #$EF, STA $DC00, NOP×4, LDA $DC01, AND #$80, ...
-        await Assert.That(bytes[0]).IsEqualTo((byte)0xA9); // LDA #imm
-        await Assert.That(bytes[1]).IsEqualTo((byte)0xEF); // column select for space
-        await Assert.That(bytes[2]).IsEqualTo((byte)0x8D); // STA abs
-        await Assert.That(bytes[3]).IsEqualTo((byte)0x00); // $DC00 lo
-        await Assert.That(bytes[4]).IsEqualTo((byte)0xDC); // $DC00 hi
-        // 4 NOPs for CIA settling time
-        await Assert.That(bytes[5]).IsEqualTo((byte)0xEA); // NOP
-        await Assert.That(bytes[6]).IsEqualTo((byte)0xEA); // NOP
-        await Assert.That(bytes[7]).IsEqualTo((byte)0xEA); // NOP
-        await Assert.That(bytes[8]).IsEqualTo((byte)0xEA); // NOP
-        await Assert.That(bytes[9]).IsEqualTo((byte)0xAD); // LDA abs
-        await Assert.That(bytes[10]).IsEqualTo((byte)0x01); // $DC01 lo
-        await Assert.That(bytes[11]).IsEqualTo((byte)0xDC); // $DC01 hi
-        await Assert.That(bytes[12]).IsEqualTo((byte)0x29); // AND #imm
-        await Assert.That(bytes[13]).IsEqualTo((byte)0x80); // row mask for space
+        // Should emit: LDA #$FF, STA $DC00, LDA #$EF, STA $DC00, NOP×4, LDA $DC01, AND #$80, BEQ
+        await Assert.That(bytes[0]).IsEqualTo((byte)0xA9); // LDA #$FF (deselect all)
+        await Assert.That(bytes[1]).IsEqualTo((byte)0xFF);
+        await Assert.That(bytes[2]).IsEqualTo((byte)0x8D); // STA $DC00
+        await Assert.That(bytes[5]).IsEqualTo((byte)0xA9); // LDA #$EF (select column 4)
+        await Assert.That(bytes[6]).IsEqualTo((byte)0xEF);
+        await Assert.That(bytes[7]).IsEqualTo((byte)0x8D); // STA $DC00
+        // NOPs at bytes 10-13
+        await Assert.That(bytes[10]).IsEqualTo((byte)0xEA); // NOP
+        // LDA $DC01 at byte 14
+        await Assert.That(bytes[14]).IsEqualTo((byte)0xAD); // LDA abs
+        await Assert.That(bytes[15]).IsEqualTo((byte)0x01); // $DC01 lo
+        await Assert.That(bytes[16]).IsEqualTo((byte)0xDC); // $DC01 hi
+        await Assert.That(bytes[17]).IsEqualTo((byte)0x29); // AND #imm
+        await Assert.That(bytes[18]).IsEqualTo((byte)0x80); // row mask for space
     }
 }

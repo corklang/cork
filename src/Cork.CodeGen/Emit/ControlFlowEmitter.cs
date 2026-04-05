@@ -336,7 +336,9 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
 
         if (IsKeyboardCheck(condition, out var colSelect, out var rowMask))
         {
-            // Select keyboard matrix column via CIA1 Port A
+            // Deselect all columns first, then select target — ensures clean transition
+            ctx.Buffer.EmitLdaImmediate(0xFF);
+            ctx.Buffer.EmitStaAbsolute(0xDC00);
             ctx.Buffer.EmitLdaImmediate(colSelect);
             ctx.Buffer.EmitStaAbsolute(0xDC00);
             // Settling time: CIA needs ~8μs for keyboard matrix lines to stabilize
@@ -347,11 +349,6 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             // Read row bits from CIA1 Port B (active low: 0 = pressed)
             ctx.Buffer.EmitLdaAbsolute(0xDC01);
             ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(rowMask); // AND #rowMask
-            // Restore $DC00 to $FF (deselect all columns) so joystick reads work
-            ctx.Buffer.EmitPha();
-            ctx.Buffer.EmitLdaImmediate(0xFF);
-            ctx.Buffer.EmitStaAbsolute(0xDC00);
-            ctx.Buffer.EmitPla();
             ctx.Buffer.EmitBeq((sbyte)skipBytes); // BEQ = bit clear = key pressed
             return;
         }
