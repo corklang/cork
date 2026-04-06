@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- Background: dark chip -->
-  <rect width="32" height="32" rx="4" fill="#313244"/>
-  <!-- Binary rows -->
-  <text x="4" y="12" font-family="monospace" font-size="7" fill="#6c7086">0801</text>
-  <text x="4" y="20" font-family="monospace" font-size="7" fill="#89b4fa">A9 0D</text>
-  <text x="4" y="28" font-family="monospace" font-size="7" fill="#89b4fa">8D 20</text>
-</svg>
