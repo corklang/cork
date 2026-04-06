@@ -357,45 +357,7 @@ public sealed class InstructionBuffer(ushort baseAddress)
     /// </summary>
     public void Optimize()
     {
-        bool changed;
-        do
-        {
-            changed = false;
-
-            // Scan for instruction pairs, never crossing labels or data
-            for (var i = 0; i < _entries.Count - 1; i++)
-            {
-                var a = _entries[i];
-                var b = _entries[i + 1];
-
-                if (a.Kind != StreamEntryKind.Instruction || b.Kind != StreamEntryKind.Instruction)
-                    continue;
-
-                var ai = a.Instruction;
-                var bi = b.Instruction;
-
-                // Rule 1: LDA #X; LDA #Y → LDA #Y (remove first)
-                if (ai.Opcode == 0xA9 && bi.Opcode == 0xA9)
-                {
-                    _entries.RemoveAt(i);
-                    PeepholeRemovals += 2;
-                    changed = true;
-                    i--;
-                    continue;
-                }
-
-                // Rule 2: STA zp; LDA zp (same addr) → STA zp (remove LDA)
-                if (ai.Opcode == 0x85 && bi.Opcode == 0xA5 &&
-                    ai.Operand == bi.Operand)
-                {
-                    _entries.RemoveAt(i + 1);
-                    PeepholeRemovals += 2;
-                    changed = true;
-                    i--;
-                    continue;
-                }
-            }
-        } while (changed);
+        PeepholeRemovals += PeepholeOptimizer.Optimize(_entries);
 
         // Recalculate byte length
         _byteLength = 0;
