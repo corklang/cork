@@ -13,25 +13,26 @@ Cork pairs a modern developer experience with the raw power of the C64's hardwar
 
 ---
 
-## Quick Start
+## Install
+
+```bash
+brew install corklang/tap/corklang
+```
+
+Then compile and run:
+
+```bash
+cork samples/gravity.cork -o gravity.prg
+x64sc -autostart gravity.prg
+```
+
+### Building from source
 
 Requires [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```bash
-# Build the compiler
 dotnet build Cork.slnx
-
-# Compile a program
 dotnet run --project src/Cork.Compiler -- samples/gravity.cork -o gravity.prg
-
-# Run in VICE emulator
-x64sc -autostart gravity.prg
-```
-
-Publish as a native binary (AOT):
-
-```bash
-dotnet publish src/Cork.Compiler -c Release
 ```
 
 ---
