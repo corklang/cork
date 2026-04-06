@@ -87,6 +87,9 @@ try
     {
         var debugPath = Path.ChangeExtension(outputPath, ".cork-debug");
         File.WriteAllText(debugPath, codeGen.LastDebugInfo.ToJson());
+
+        var monPath = Path.ChangeExtension(outputPath, ".mon");
+        File.WriteAllText(monPath, codeGen.LastDebugInfo.ToViceMonCommands());
     }
 
     // Memory usage report
