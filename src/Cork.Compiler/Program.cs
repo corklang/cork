@@ -79,6 +79,13 @@ try
     PrgWriter.WriteToFile(outputPath, machineCode);
     var fileSize = new FileInfo(outputPath).Length;
 
+    // Write debug symbols
+    if (codeGen.LastDebugInfo != null)
+    {
+        var debugPath = Path.ChangeExtension(outputPath, ".cork-debug");
+        File.WriteAllText(debugPath, codeGen.LastDebugInfo.ToJson());
+    }
+
     // Memory usage report
     var codeEnd = (ushort)(codeStart + machineCode.Length);
     var availableRam = 0x9FFF - codeStart; // $080E to $9FFF (BASIC ROM banked out)

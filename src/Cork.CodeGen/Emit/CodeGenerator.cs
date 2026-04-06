@@ -9,6 +9,8 @@ using Cork.Language.Ast;
 /// </summary>
 public sealed class CodeGenerator(ushort codeBase = 0x0810)
 {
+    public DebugInfo? LastDebugInfo { get; private set; }
+
     public (byte[] Code, ushort EntryPoint, int PeepholeRemovals) Generate(ProgramNode program)
     {
         // Dead code elimination: determine which globals are reachable from scenes
@@ -75,8 +77,9 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         var spriteSegStart = (ushort)(codeBase + measuredSize + constDataSize + measureInlineData.Length);
         var (spriteData, spritePointers) = BuildAlignedSpriteData(inlineSprites, spriteSegStart);
 
-        // Final pass: emit with real sprite pointer values
+        // Final pass: emit with real sprite pointer values and debug info
         var ctx = CreateContext(codeBase, dataAddresses);
+        ctx.Debug = new DebugInfo();
         RegisterAllTypes(ctx, program, globalVars, constArraySizes, inlineSprites, reachable.Methods);
         foreach (var (dataName, _, _, _) in inlineSprites)
         {
@@ -93,6 +96,26 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         var inlineDataStart = (ushort)(codeBase + codeSize + constDataSize);
         var inlineData = ctx.FinalizeInlineData(inlineDataStart);
         ctx.Buffer.ResolveFixups();
+
+        // Extract variable debug info from symbol table
+        if (ctx.Debug != null)
+        {
+            foreach (var (name, zp) in ctx.Symbols.Globals)
+            {
+                var type = ctx.Symbols.GetVarType(name) ?? "byte";
+                var size = SymbolTable.Is16BitType(type) ? 2 : 1;
+                ctx.Debug.AddVariable(name, type, zp, size, "global");
+            }
+            foreach (var (name, inst) in ctx.Symbols.StructInstances)
+            {
+                foreach (var (field, zp) in inst.Fields)
+                {
+                    var fullName = $"{name}.{field}";
+                    ctx.Debug.AddVariable(fullName, inst.StructType, zp, 1, "global");
+                }
+            }
+            LastDebugInfo = ctx.Debug;
+        }
 
         // Combine code + const data + inline data + aligned sprite data
         var code = ctx.Buffer.ToArray();
@@ -270,6 +293,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
     {
         var label = $"_method_{gm.SelectorName}";
         ctx.Buffer.DefineLabel(label);
+        ctx.Debug?.OpenScope(ctx.Debug.Methods, gm.SelectorName, ctx.Buffer.CurrentAddress);
         // Each method gets its own non-overlapping local zone so nested calls work.
         ctx.Symbols.PrepareMethodLocals();
         ctx.Symbols.InstallMethodParamLocals(gm.SelectorName, gm.Parameters);
@@ -277,6 +301,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         ctx.Symbols.RemoveMethodParamLocals(gm.Parameters);
         ctx.Symbols.FinalizeMethodLocals();
         ctx.Buffer.EmitRts();
+        ctx.Debug?.CloseScope(ctx.Debug.Methods, gm.SelectorName, ctx.Buffer.CurrentAddress);
     }
 
     /// <summary>

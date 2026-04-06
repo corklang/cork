@@ -51,6 +51,9 @@ public sealed class EmitContext
     // Collected errors for multi-error reporting
     public List<CompileError> Errors { get; } = [];
 
+    // Debug symbol information (populated during final emission pass)
+    public DebugInfo? Debug { get; set; }
+
     // For-each over const byte array: (varName, dataAddr, indexZp)
     public (string Name, ushort DataAddr, byte IndexZp)? ForEachVar { get; set; }
     // For-each over struct array
