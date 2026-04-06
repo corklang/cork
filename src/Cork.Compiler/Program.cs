@@ -40,6 +40,19 @@ for (var i = 1; i < args.Length - 1; i++)
     if (args[i] == "-o") outputPath = args[i + 1];
 }
 
+// Resolve stdlib: CORK_STDLIB env var, or ../share/corklang/stdlib relative to binary
+string? stdlibPath = Environment.GetEnvironmentVariable("CORK_STDLIB");
+if (stdlibPath == null)
+{
+    var binDir = Path.GetDirectoryName(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar));
+    if (binDir != null)
+    {
+        var candidate = Path.Combine(binDir, "share", "corklang", "stdlib");
+        if (Directory.Exists(candidate))
+            stdlibPath = candidate;
+    }
+}
+
 try
 {
     var source = File.ReadAllText(sourcePath);
@@ -51,7 +64,7 @@ try
     Console.WriteLine($"  Lexed {tokens.Count} tokens");
 
     // Parse
-    var parser = new Parser(tokens, Path.GetDirectoryName(Path.GetFullPath(sourcePath)) ?? ".");
+    var parser = new Parser(tokens, Path.GetDirectoryName(Path.GetFullPath(sourcePath)) ?? ".", stdlibPath);
     var program = parser.ParseProgram();
     Console.WriteLine($"  Parsed {program.Declarations.Count} top-level declarations");
 

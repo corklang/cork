@@ -3,7 +3,7 @@ namespace Cork.Language.Parsing;
 using Cork.Language.Ast;
 using Cork.Language.Lexing;
 
-public sealed class Parser(List<Token> tokens, string basePath = ".")
+public sealed class Parser(List<Token> tokens, string basePath = ".", string? stdlibPath = null)
 {
     private int _pos;
 
@@ -25,6 +25,11 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
 
                 var importPath = (string)pathToken.LiteralValue!;
                 var fullPath = Path.Combine(basePath, importPath);
+
+                // Fallback to stdlib directory if not found relative to source
+                if (!File.Exists(fullPath) && stdlibPath != null)
+                    fullPath = Path.Combine(stdlibPath, importPath);
+
                 var normalizedPath = Path.GetFullPath(fullPath);
 
                 // Prevent double imports
@@ -36,7 +41,7 @@ public sealed class Parser(List<Token> tokens, string basePath = ".")
                 var importSource = File.ReadAllText(fullPath);
                 var importLexer = new Lexing.Lexer(importSource, fullPath);
                 var importTokens = importLexer.Tokenize();
-                var importParser = new Parser(importTokens, Path.GetDirectoryName(fullPath) ?? ".");
+                var importParser = new Parser(importTokens, Path.GetDirectoryName(fullPath) ?? ".", stdlibPath);
                 var importProgram = importParser.ParseProgram();
 
                 declarations.AddRange(importProgram.Declarations);
