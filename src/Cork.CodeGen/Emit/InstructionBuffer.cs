@@ -252,6 +252,68 @@ public sealed class InstructionBuffer(ushort baseAddress)
     public void EmitSei() => Append(StreamEntry.Instr(NextId(), 0x78, AddressMode.Implied));
     public void EmitCli() => Append(StreamEntry.Instr(NextId(), 0x58, AddressMode.Implied));
 
+    // --- Debug ---
+
+    public void DumpInstructions()
+    {
+        ushort addr = baseAddress;
+        foreach (var entry in _entries)
+        {
+            switch (entry.Kind)
+            {
+                case StreamEntryKind.Instruction:
+                    var i = entry.Instruction;
+                    var name = FormatOpcode(i.Opcode);
+                    var operand = i.Mode switch
+                    {
+                        AddressMode.Implied or AddressMode.Accumulator => i.Mode == AddressMode.Accumulator ? "A" : "",
+                        AddressMode.Immediate => $"#${i.Operand:X2}",
+                        AddressMode.ZeroPage => $"${i.Operand:X2}",
+                        AddressMode.ZeroPageX => $"${i.Operand:X2},X",
+                        AddressMode.Absolute => $"${i.Operand:X4}",
+                        AddressMode.AbsoluteX => $"${i.Operand:X4},X",
+                        AddressMode.AbsoluteY => $"${i.Operand:X4},Y",
+                        AddressMode.IndirectY => $"(${i.Operand:X2}),Y",
+                        AddressMode.Relative => $"{(sbyte)(byte)i.Operand:+0;-0;+0}",
+                        _ => "?"
+                    };
+                    Console.Error.WriteLine($"  ${addr:X4}: {name} {operand}".TrimEnd());
+                    break;
+                case StreamEntryKind.Label:
+                    Console.Error.WriteLine($"{entry.LabelName}:");
+                    break;
+                case StreamEntryKind.BranchToLabel:
+                    Console.Error.WriteLine($"  ${addr:X4}: {FormatOpcode(entry.BranchOpcode)} -> {entry.BranchTarget}");
+                    break;
+                case StreamEntryKind.Data:
+                    Console.Error.WriteLine($"  ${addr:X4}: .byte [{entry.RawData?.Length ?? 0}]");
+                    break;
+            }
+            addr += (ushort)entry.Size;
+        }
+    }
+
+    private static string FormatOpcode(byte op) => op switch
+    {
+        0xA9 or 0xA5 or 0xAD or 0xBD or 0xB9 or 0xB1 or 0xB5 => "LDA",
+        0x85 or 0x8D or 0x9D or 0x91 or 0x95 => "STA",
+        0xA2 or 0xA6 => "LDX", 0xA0 or 0xA4 => "LDY",
+        0x86 => "STX", 0x84 => "STY",
+        0x69 or 0x65 or 0x6D => "ADC", 0xE9 or 0xE5 => "SBC",
+        0x18 => "CLC", 0x38 => "SEC",
+        0xC9 or 0xC5 => "CMP", 0xE0 => "CPX", 0xC0 => "CPY",
+        0x4C => "JMP", 0x20 => "JSR", 0x60 => "RTS",
+        0xD0 => "BNE", 0xF0 => "BEQ", 0x90 => "BCC", 0xB0 => "BCS", 0x30 => "BMI", 0x10 => "BPL",
+        0xAA => "TAX", 0xA8 => "TAY", 0x8A => "TXA", 0x98 => "TYA",
+        0x48 => "PHA", 0x68 => "PLA", 0x08 => "PHP", 0x28 => "PLP",
+        0xE8 => "INX", 0xC8 => "INY", 0xCA => "DEX", 0x88 => "DEY",
+        0xE6 => "INC", 0xC6 => "DEC",
+        0x06 or 0x0A => "ASL", 0x46 or 0x4A => "LSR", 0x26 => "ROL", 0x66 or 0x6A => "ROR",
+        0x29 or 0x25 or 0x31 => "AND", 0x09 or 0x05 or 0x11 => "ORA", 0x49 or 0x45 => "EOR",
+        0xEA => "NOP", 0x78 => "SEI", 0x58 => "CLI",
+        _ => $"?{op:X2}"
+    };
+
     // --- Forward references ---
 
     public void EmitJmpForward(string label)
