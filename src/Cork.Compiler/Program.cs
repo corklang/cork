@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using Cork.Language.Lexing;
 using Cork.Language.Parsing;
@@ -13,6 +14,7 @@ if (args.Length == 0 || args[0] is "--help" or "-h")
     Console.WriteLine($"Cork {version} — a programming language for the Commodore 64");
     Console.WriteLine();
     Console.WriteLine("Usage: cork <source.cork> [-o output.prg]");
+    Console.WriteLine("       cork run <source.cork>      Compile and run in VICE");
     Console.WriteLine();
     Console.WriteLine("Options:");
     Console.WriteLine("  -o <file>    Output file path (default: <source>.prg)");
@@ -28,10 +30,14 @@ if (args[0] is "--version")
     return 0;
 }
 
-var sourcePath = args[0];
-if (!File.Exists(sourcePath))
+// `cork run file.cork` — compile and launch in VICE
+var isRun = args[0] is "run";
+var sourcePath = isRun ? args.ElementAtOrDefault(1) ?? "" : args[0];
+if (sourcePath == "" || !File.Exists(sourcePath))
 {
-    Console.Error.WriteLine($"Error: File not found: {sourcePath}");
+    Console.Error.WriteLine(sourcePath == ""
+        ? "Error: No source file specified"
+        : $"Error: File not found: {sourcePath}");
     return 1;
 }
 
@@ -101,6 +107,26 @@ try
     Console.WriteLine($"  RAM:    {machineCode.Length}/{availableRam} bytes used ({usedPercent}%)");
     if (peepholeRemovals > 0)
         Console.WriteLine($"  Peephole: {peepholeRemovals} bytes removed");
+
+    if (isRun)
+    {
+        var monPath = Path.ChangeExtension(outputPath, ".mon");
+        var viceArgs = File.Exists(monPath)
+            ? $"-moncommands \"{monPath}\" -autostart \"{outputPath}\""
+            : $"-autostart \"{outputPath}\"";
+
+        Console.WriteLine($"  Launching VICE...");
+        try
+        {
+            Process.Start(new ProcessStartInfo("x64sc", viceArgs) { UseShellExecute = false });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error: Could not launch x64sc: {ex.Message}");
+            Console.Error.WriteLine("  Install VICE or ensure x64sc is in your PATH");
+            return 1;
+        }
+    }
 
     return 0;
 }
