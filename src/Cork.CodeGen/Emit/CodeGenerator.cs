@@ -11,7 +11,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 {
     public DebugInfo? LastDebugInfo { get; private set; }
 
-    public (byte[] Code, ushort EntryPoint, int PeepholeRemovals) Generate(ProgramNode program)
+    public (byte[] Code, ushort EntryPoint, int PeepholeRemovals, int MutableDataSize) Generate(ProgramNode program)
     {
         // Dead code elimination: determine which globals are reachable from scenes
         var reachable = ReachabilityAnalysis.Analyze(program);
@@ -72,6 +72,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         // Measure inline string data size (deterministic, same between passes)
         var measureCtx = CreateContext(codeBase, dataAddresses);
         RegisterAllTypes(measureCtx, program, globalVars, constArraySizes, inlineSprites, reachable.Methods);
+        measureCtx.ResolveMutableDataAddresses(0x8000); // placeholder
         EmitCode(measureCtx, program, scenes, globalVars, entryScene, reachable.Methods, usesRandom);
         measureCtx.Buffer.Optimize();
         measureCtx.Buffer.ResolveFixups();
@@ -86,10 +87,14 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
             Console.Error.WriteLine($"  [debug] spriteSegStart=${spriteSegStart:X4} constDataSize={constDataSize} inlineDataLen={measureInlineData.Length}");
         var (spriteData, spritePointers) = BuildAlignedSpriteData(inlineSprites, spriteSegStart);
 
+        // Compute mutable data array positions (after sprite data, in uninitialized RAM)
+        var mutableDataStart = (ushort)(spriteSegStart + spriteData.Length);
+
         // Final pass: emit with real sprite pointer values and debug info
         var ctx = CreateContext(codeBase, dataAddresses);
         ctx.Debug = new DebugInfo();
         RegisterAllTypes(ctx, program, globalVars, constArraySizes, inlineSprites, reachable.Methods);
+        ctx.ResolveMutableDataAddresses(mutableDataStart);
         foreach (var (dataName, _, _, _) in inlineSprites)
         {
             var ptrName = dataName.Replace("Data", "Ptr");
@@ -144,7 +149,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         dataBytes.CopyTo(result.AsSpan()[code.Length..]);
         inlineData.CopyTo(result, code.Length + constDataSize);
         spriteData.CopyTo(result, code.Length + constDataSize + inlineData.Length);
-        return (result, codeBase, ctx.Buffer.PeepholeRemovals);
+        return (result, codeBase, ctx.Buffer.PeepholeRemovals, ctx.MutableDataSize);
     }
 
     private static EmitContext CreateContext(ushort codeBase, Dictionary<string, ushort> dataAddresses)
@@ -179,10 +184,19 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
             if (gv.ArraySize > 0)
             {
-                var zpBase = ctx.Symbols.AllocGlobalArray(gv.Name, gv.ArraySize);
-                ctx.RegisterConstArraySize(gv.Name, gv.ArraySize);
-                if (gv.TypeName == "string")
-                    ctx.Symbols.RegisterStringVar(gv.Name, zpBase, gv.ArraySize, isGlobal: true);
+                // Large arrays go in absolute memory, not ZP
+                if (gv.ArraySize > 64)
+                {
+                    ctx.RegisterMutableDataArray(gv.Name, gv.ArraySize);
+                    ctx.RegisterConstArraySize(gv.Name, gv.ArraySize);
+                }
+                else
+                {
+                    var zpBase = ctx.Symbols.AllocGlobalArray(gv.Name, gv.ArraySize);
+                    ctx.RegisterConstArraySize(gv.Name, gv.ArraySize);
+                    if (gv.TypeName == "string")
+                        ctx.Symbols.RegisterStringVar(gv.Name, zpBase, gv.ArraySize, isGlobal: true);
+                }
             }
             else
                 ctx.Symbols.AllocGlobal(gv.Name);
@@ -253,6 +267,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
         var ctx = CreateContext(codeBase, dataAddresses);
         RegisterAllTypes(ctx, program, globalVars, constArraySizes, inlineSprites, reachableMethods);
+        ctx.ResolveMutableDataAddresses(0x8000); // placeholder — address doesn't affect code size
 
         var entryScene = scenes.First(s => s.IsEntry);
         EmitCode(ctx, program, scenes, globalVars, entryScene, reachableMethods, usesRandom);
@@ -273,6 +288,28 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
     {
         // Const scalars have no runtime storage
         if (gv.IsConst && gv.ArraySize == 0) return;
+
+        // Mutable data arrays in absolute memory: zero-fill with a loop
+        if (gv.ArraySize > 0 && ctx.MutableDataAddresses.TryGetValue(gv.Name, out var mutableAddr))
+        {
+            var loopLabel = ctx.NextLabel("_zinit");
+            var endLabel = ctx.NextLabel("_zinit_end");
+            ctx.Buffer.EmitLdaImmediate(0);
+            ctx.Buffer.EmitLdxImmediate(0);
+            ctx.Buffer.DefineLabel(loopLabel);
+            ctx.Buffer.EmitStaAbsoluteX(mutableAddr);
+            ctx.Buffer.EmitInx();
+            if (gv.ArraySize == 256)
+            {
+                ctx.Buffer.EmitBneToLabel(loopLabel);
+            }
+            else
+            {
+                ctx.Buffer.EmitCpxImmediate((byte)gv.ArraySize);
+                ctx.Buffer.EmitBneToLabel(loopLabel);
+            }
+            return;
+        }
 
         var zp = ctx.Symbols.GetLocal(gv.Name);
 
@@ -320,7 +357,10 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         // Each method gets its own non-overlapping local zone so nested calls work.
         ctx.Symbols.PrepareMethodLocals();
         ctx.Symbols.InstallMethodParamLocals(gm.SelectorName, gm.Parameters);
+        var prevMethod = ctx.ActiveMethodSelector;
+        ctx.ActiveMethodSelector = gm.SelectorName;
         ctx.Statements.EmitBlock(gm.Body);
+        ctx.ActiveMethodSelector = prevMethod;
         ctx.Symbols.RemoveMethodParamLocals(gm.Parameters);
         ctx.Symbols.FinalizeMethodLocals();
         ctx.Buffer.EmitRts();

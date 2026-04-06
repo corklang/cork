@@ -26,7 +26,7 @@ public class IntegrationTests
 
         var codeStart = PrgWriter.CalculateCodeStart();
         var codeGen = new CodeGenerator(codeStart);
-        var (machineCode, entryPoint, _) = codeGen.Generate(program);
+        var (machineCode, entryPoint, _, _) = codeGen.Generate(program);
         var prg = PrgWriter.Create(machineCode);
 
         // PRG header: 2-byte load address (little-endian $0801)
@@ -61,7 +61,7 @@ public class IntegrationTests
 
         var codeStart = PrgWriter.CalculateCodeStart();
         var codeGen = new CodeGenerator(codeStart);
-        var (machineCode, _, _) = codeGen.Generate(program);
+        var (machineCode, _, _, _) = codeGen.Generate(program);
 
         // Should produce valid machine code without errors
         await Assert.That(machineCode.Length).IsGreaterThan(0);
@@ -88,7 +88,7 @@ public class IntegrationTests
 
         var codeStart = PrgWriter.CalculateCodeStart();
         var codeGen = new CodeGenerator(codeStart);
-        var (machineCode, _, _) = codeGen.Generate(program);
+        var (machineCode, _, _, _) = codeGen.Generate(program);
 
         await Assert.That(machineCode.Length).IsGreaterThan(0);
     }
@@ -117,7 +117,7 @@ public class IntegrationTests
 
         var codeStart = PrgWriter.CalculateCodeStart();
         var codeGen = new CodeGenerator(codeStart);
-        var (machineCode, _, _) = codeGen.Generate(program);
+        var (machineCode, _, _, _) = codeGen.Generate(program);
 
         await Assert.That(machineCode.Length).IsGreaterThan(0);
     }

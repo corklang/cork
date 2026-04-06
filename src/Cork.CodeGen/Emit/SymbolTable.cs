@@ -286,8 +286,8 @@ public sealed class SymbolTable
     /// <summary>
     /// Allocate shared param zone ZP slots for a method's parameters.
     /// All methods reuse the same ZP region starting at ParamZoneBase.
-    /// Each method gets sequential slots from the base — they overlap between methods
-    /// which is safe since calls are non-reentrant.
+    /// The compiler emits save/restore code at call sites when needed
+    /// to prevent nested calls from clobbering the caller's params.
     /// </summary>
     public Dictionary<string, byte> AllocMethodParams(string selectorName, List<MethodParameter> parameters)
     {
@@ -313,6 +313,20 @@ public sealed class SymbolTable
         if (zp > _paramZoneEnd) _paramZoneEnd = zp;
         _methodParamZp[selectorName] = zpMap;
         return zpMap;
+    }
+
+    /// <summary>Get the ZP range used by a method's params (lo inclusive, hi exclusive).</summary>
+    public (byte Lo, byte Hi) GetMethodParamRange(string selectorName)
+    {
+        if (!_methodParamZp.TryGetValue(selectorName, out var zpMap) || zpMap.Count == 0)
+            return (ParamZoneBase, ParamZoneBase);
+        byte lo = 0xFF, hi = 0;
+        foreach (var zp in zpMap.Values)
+        {
+            if (zp < lo) lo = zp;
+            if (zp >= hi) hi = (byte)(zp + 1);
+        }
+        return (lo, hi);
     }
 
     public bool TryGetMethodParamZp(string selectorName, out Dictionary<string, byte> zpMap) =>
