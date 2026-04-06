@@ -16,6 +16,7 @@ if (args.Length == 0 || args[0] is "--help" or "-h")
     Console.WriteLine();
     Console.WriteLine("Options:");
     Console.WriteLine("  -o <file>    Output file path (default: <source>.prg)");
+    Console.WriteLine("  --no-debug   Don't write .cork-debug symbol file");
     Console.WriteLine("  --version    Print version");
     Console.WriteLine("  --help, -h   Print this help");
     return 0;
@@ -35,9 +36,11 @@ if (!File.Exists(sourcePath))
 }
 
 var outputPath = Path.ChangeExtension(sourcePath, ".prg");
-for (var i = 1; i < args.Length - 1; i++)
+var emitDebug = true;
+for (var i = 1; i < args.Length; i++)
 {
-    if (args[i] == "-o") outputPath = args[i + 1];
+    if (args[i] == "-o" && i + 1 < args.Length) outputPath = args[++i];
+    if (args[i] == "--no-debug") emitDebug = false;
 }
 
 // Resolve stdlib search root: imports like "stdlib/screen.cork" resolve against this.
@@ -80,7 +83,7 @@ try
     var fileSize = new FileInfo(outputPath).Length;
 
     // Write debug symbols
-    if (codeGen.LastDebugInfo != null)
+    if (emitDebug && codeGen.LastDebugInfo != null)
     {
         var debugPath = Path.ChangeExtension(outputPath, ".cork-debug");
         File.WriteAllText(debugPath, codeGen.LastDebugInfo.ToJson());
