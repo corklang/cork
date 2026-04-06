@@ -7,7 +7,7 @@ namespace Cork.CodeGen.Emit;
 /// </summary>
 public sealed class EmitContext
 {
-    public AssemblyBuffer Buffer { get; }
+    public InstructionBuffer Buffer { get; }
     public SymbolTable Symbols { get; }
     public HashSet<string> Runtime { get; } = [];
     public Stack<(string BreakLabel, string ContinueLabel)> LoopStack { get; } = [];
@@ -43,7 +43,7 @@ public sealed class EmitContext
 
     public EmitContext(ushort codeBase, Dictionary<string, ushort> dataAddresses)
     {
-        Buffer = new AssemblyBuffer(codeBase);
+        Buffer = new InstructionBuffer(codeBase);
         Symbols = new SymbolTable();
         DataAddresses = dataAddresses;
     }

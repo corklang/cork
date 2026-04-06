@@ -1,0 +1,596 @@
+namespace Cork.CodeGen.Emit;
+
+/// <summary>
+/// Drop-in replacement for AssemblyBuffer that builds a List&lt;StreamEntry&gt;
+/// instead of raw bytes. Same public API — emitters don't need changes.
+/// Supports peephole optimization passes before serialization to bytes.
+/// </summary>
+public sealed class InstructionBuffer(ushort baseAddress)
+{
+    private readonly List<StreamEntry> _entries = [];
+    private readonly List<(int entryId, string label, FixupKind kind)> _fixups = [];
+    private readonly Dictionary<string, int> _labelEntryIds = []; // label name → entry ID
+    private readonly Dictionary<ushort, string> _labelAddresses = []; // addr → label name (for backward jump detection)
+
+    private enum FixupKind { Word, LoByte, HiByte }
+
+    private int _nextId;
+    // Running byte total — updated on every append to avoid O(n) per CurrentAddress call
+    private int _byteLength;
+
+    public ushort BaseAddress => baseAddress;
+    public ushort CurrentAddress => (ushort)(baseAddress + _byteLength);
+    public int Length => _byteLength;
+    public int PeepholeRemovals { get; set; }
+
+    // Expose entries for the peephole optimizer
+    internal List<StreamEntry> Entries => _entries;
+
+    private int NextId() => _nextId++;
+
+    private void Append(StreamEntry entry)
+    {
+        _byteLength += entry.Size;
+        _entries.Add(entry);
+    }
+
+    // --- Label management ---
+
+    public void DefineLabel(string name)
+    {
+        var id = NextId();
+        _labelEntryIds[name] = id;
+        _labelAddresses[CurrentAddress] = name;
+        Append(StreamEntry.LabelDef(id, name));
+    }
+
+    // --- Raw data emission (for backward compat with EmitByte callers) ---
+
+    public void EmitByte(byte value) => Append(StreamEntry.DataBlob(NextId(), [value]));
+
+    public void EmitWord(ushort value)
+        => Append(StreamEntry.DataBlob(NextId(), [(byte)(value & 0xFF), (byte)(value >> 8)]));
+
+    public void EmitBytes(ReadOnlySpan<byte> data)
+        => Append(StreamEntry.DataBlob(NextId(), data.ToArray()));
+
+    // --- 6510 Instructions ---
+
+    // LDA
+    public void EmitLdaImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0xA9, AddressMode.Immediate, value));
+
+    public void EmitLdaZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0xA5, AddressMode.ZeroPage, addr));
+
+    public void EmitLdaAbsolute(ushort addr)
+        => Append(StreamEntry.Instr(NextId(), 0xAD, AddressMode.Absolute, addr));
+
+    public void EmitLdaAbsoluteX(ushort addr)
+        => Append(StreamEntry.Instr(NextId(), 0xBD, AddressMode.AbsoluteX, addr));
+
+    public void EmitLdaAbsoluteY(ushort addr)
+        => Append(StreamEntry.Instr(NextId(), 0xB9, AddressMode.AbsoluteY, addr));
+
+    public void EmitLdaIndirectY(byte zpAddr)
+        => Append(StreamEntry.Instr(NextId(), 0xB1, AddressMode.IndirectY, zpAddr));
+    public void EmitLdaZeroPageX(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0xB5, AddressMode.ZeroPageX, addr));
+    public void EmitStaZeroPageX(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x95, AddressMode.ZeroPageX, addr));
+
+    // LDY
+    public void EmitLdyZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0xA4, AddressMode.ZeroPage, addr));
+
+    public void EmitLdyImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0xA0, AddressMode.Immediate, value));
+
+    // LDX
+    public void EmitLdxImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0xA2, AddressMode.Immediate, value));
+
+    public void EmitLdxZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0xA6, AddressMode.ZeroPage, addr));
+
+    // STA
+    public void EmitStaZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x85, AddressMode.ZeroPage, addr));
+
+    public void EmitStaAbsolute(ushort addr)
+        => Append(StreamEntry.Instr(NextId(), 0x8D, AddressMode.Absolute, addr));
+
+    public void EmitStaAbsoluteX(ushort addr)
+        => Append(StreamEntry.Instr(NextId(), 0x9D, AddressMode.AbsoluteX, addr));
+
+    public void EmitStaIndirectY(byte zpAddr)
+        => Append(StreamEntry.Instr(NextId(), 0x91, AddressMode.IndirectY, zpAddr));
+
+    // STX
+    public void EmitStxZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x86, AddressMode.ZeroPage, addr));
+
+    // STY
+    public void EmitStyZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x84, AddressMode.ZeroPage, addr));
+
+    // Arithmetic
+    public void EmitClc() => Append(StreamEntry.Instr(NextId(), 0x18, AddressMode.Implied));
+    public void EmitSec() => Append(StreamEntry.Instr(NextId(), 0x38, AddressMode.Implied));
+    public void EmitAdcImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0x69, AddressMode.Immediate, value));
+    public void EmitAdcZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x65, AddressMode.ZeroPage, addr));
+    public void EmitAdcAbsolute(ushort addr)
+        => Append(StreamEntry.Instr(NextId(), 0x6D, AddressMode.Absolute, addr));
+    public void EmitSbcImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0xE9, AddressMode.Immediate, value));
+    public void EmitSbcZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0xE5, AddressMode.ZeroPage, addr));
+
+    // Bitwise
+    public void EmitAndImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0x29, AddressMode.Immediate, value));
+    public void EmitOraImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0x09, AddressMode.Immediate, value));
+    public void EmitEorImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0x49, AddressMode.Immediate, value));
+    public void EmitAndZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x25, AddressMode.ZeroPage, addr));
+    public void EmitOraZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x05, AddressMode.ZeroPage, addr));
+    public void EmitEorZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x45, AddressMode.ZeroPage, addr));
+    public void EmitOraIndirectY(byte zpAddr)
+        => Append(StreamEntry.Instr(NextId(), 0x11, AddressMode.IndirectY, zpAddr));
+    public void EmitAndIndirectY(byte zpAddr)
+        => Append(StreamEntry.Instr(NextId(), 0x31, AddressMode.IndirectY, zpAddr));
+
+    // Increment / Decrement
+    public void EmitInx() => Append(StreamEntry.Instr(NextId(), 0xE8, AddressMode.Implied));
+    public void EmitIny() => Append(StreamEntry.Instr(NextId(), 0xC8, AddressMode.Implied));
+    public void EmitDex() => Append(StreamEntry.Instr(NextId(), 0xCA, AddressMode.Implied));
+    public void EmitDey() => Append(StreamEntry.Instr(NextId(), 0x88, AddressMode.Implied));
+    public void EmitIncZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0xE6, AddressMode.ZeroPage, addr));
+    public void EmitDecZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0xC6, AddressMode.ZeroPage, addr));
+
+    // Shift
+    public void EmitAslAccumulator()
+        => Append(StreamEntry.Instr(NextId(), 0x0A, AddressMode.Accumulator));
+    public void EmitLsrAccumulator()
+        => Append(StreamEntry.Instr(NextId(), 0x4A, AddressMode.Accumulator));
+    public void EmitRorAccumulator()
+        => Append(StreamEntry.Instr(NextId(), 0x6A, AddressMode.Accumulator));
+    public void EmitLsrZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x46, AddressMode.ZeroPage, addr));
+    public void EmitRorZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x66, AddressMode.ZeroPage, addr));
+    public void EmitAslZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x06, AddressMode.ZeroPage, addr));
+    public void EmitRolZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x26, AddressMode.ZeroPage, addr));
+
+    // Compare
+    public void EmitCmpImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0xC9, AddressMode.Immediate, value));
+    public void EmitCmpZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0xC5, AddressMode.ZeroPage, addr));
+    public void EmitCpxImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0xE0, AddressMode.Immediate, value));
+    public void EmitCpyImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0xC0, AddressMode.Immediate, value));
+
+    // Branch
+    public void EmitBne(sbyte offset)
+        => Append(StreamEntry.Instr(NextId(), 0xD0, AddressMode.Relative, (ushort)(byte)offset));
+    public void EmitBeq(sbyte offset)
+        => Append(StreamEntry.Instr(NextId(), 0xF0, AddressMode.Relative, (ushort)(byte)offset));
+    public void EmitBcc(sbyte offset)
+        => Append(StreamEntry.Instr(NextId(), 0x90, AddressMode.Relative, (ushort)(byte)offset));
+    public void EmitBcs(sbyte offset)
+        => Append(StreamEntry.Instr(NextId(), 0xB0, AddressMode.Relative, (ushort)(byte)offset));
+    public void EmitBmi(sbyte offset)
+        => Append(StreamEntry.Instr(NextId(), 0x30, AddressMode.Relative, (ushort)(byte)offset));
+    public void EmitBpl(sbyte offset)
+        => Append(StreamEntry.Instr(NextId(), 0x10, AddressMode.Relative, (ushort)(byte)offset));
+
+    // Label-based branches — resolved during ResolveFixups
+    public void EmitBneToLabel(string label)
+        => Append(StreamEntry.Branch(NextId(), 0xD0, label));
+    public void EmitBeqToLabel(string label)
+        => Append(StreamEntry.Branch(NextId(), 0xF0, label));
+    public void EmitBccToLabel(string label)
+        => Append(StreamEntry.Branch(NextId(), 0x90, label));
+    public void EmitBcsToLabel(string label)
+        => Append(StreamEntry.Branch(NextId(), 0xB0, label));
+    public void EmitBmiToLabel(string label)
+        => Append(StreamEntry.Branch(NextId(), 0x30, label));
+    public void EmitBplToLabel(string label)
+        => Append(StreamEntry.Branch(NextId(), 0x10, label));
+
+    // Jump — auto-detect backward label references and convert to fixups
+    public void EmitJmpAbsolute(ushort addr)
+    {
+        if (_labelAddresses.TryGetValue(addr, out var label))
+        {
+            var id = NextId();
+            _fixups.Add((id, label, FixupKind.Word));
+            Append(StreamEntry.Instr(id, 0x4C, AddressMode.Absolute, addr));
+        }
+        else
+            Append(StreamEntry.Instr(NextId(), 0x4C, AddressMode.Absolute, addr));
+    }
+    public void EmitJsrAbsolute(ushort addr)
+    {
+        if (_labelAddresses.TryGetValue(addr, out var label))
+        {
+            var id = NextId();
+            _fixups.Add((id, label, FixupKind.Word));
+            Append(StreamEntry.Instr(id, 0x20, AddressMode.Absolute, addr));
+        }
+        else
+            Append(StreamEntry.Instr(NextId(), 0x20, AddressMode.Absolute, addr));
+    }
+    public void EmitRts() => Append(StreamEntry.Instr(NextId(), 0x60, AddressMode.Implied));
+
+    // Transfer
+    public void EmitTax() => Append(StreamEntry.Instr(NextId(), 0xAA, AddressMode.Implied));
+    public void EmitTay() => Append(StreamEntry.Instr(NextId(), 0xA8, AddressMode.Implied));
+    public void EmitTxa() => Append(StreamEntry.Instr(NextId(), 0x8A, AddressMode.Implied));
+    public void EmitTya() => Append(StreamEntry.Instr(NextId(), 0x98, AddressMode.Implied));
+
+    // Stack
+    public void EmitPha() => Append(StreamEntry.Instr(NextId(), 0x48, AddressMode.Implied));
+    public void EmitPla() => Append(StreamEntry.Instr(NextId(), 0x68, AddressMode.Implied));
+    public void EmitPhp() => Append(StreamEntry.Instr(NextId(), 0x08, AddressMode.Implied));
+    public void EmitPlp() => Append(StreamEntry.Instr(NextId(), 0x28, AddressMode.Implied));
+
+    // Misc
+    public void EmitNop() => Append(StreamEntry.Instr(NextId(), 0xEA, AddressMode.Implied));
+    public void EmitSei() => Append(StreamEntry.Instr(NextId(), 0x78, AddressMode.Implied));
+    public void EmitCli() => Append(StreamEntry.Instr(NextId(), 0x58, AddressMode.Implied));
+
+    // --- Debug markers ---
+
+    /// <summary>
+    /// Insert a zero-size debug marker at the current position.
+    /// After ResolveFixups(), use ResolveMarkerAddress() to get the final byte address.
+    /// </summary>
+    public int EmitDebugMarker()
+    {
+        var id = NextId();
+        Append(StreamEntry.Marker(id));
+        return id;
+    }
+
+    /// <summary>
+    /// Resolve a debug marker ID to its final byte address.
+    /// Must be called after ResolveFixups().
+    /// </summary>
+    public ushort ResolveMarkerAddress(int markerId)
+    {
+        ushort addr = baseAddress;
+        foreach (var entry in _entries)
+        {
+            if (entry.Kind == StreamEntryKind.DebugMarker && entry.Id == markerId)
+                return addr;
+            addr += (ushort)entry.Size;
+        }
+        throw new InvalidOperationException($"Debug marker {markerId} not found");
+    }
+
+    // --- Debug ---
+
+    public void DumpInstructions()
+    {
+        ushort addr = baseAddress;
+        foreach (var entry in _entries)
+        {
+            switch (entry.Kind)
+            {
+                case StreamEntryKind.Instruction:
+                    var i = entry.Instruction;
+                    var name = FormatOpcode(i.Opcode);
+                    var operand = i.Mode switch
+                    {
+                        AddressMode.Implied or AddressMode.Accumulator => i.Mode == AddressMode.Accumulator ? "A" : "",
+                        AddressMode.Immediate => $"#${i.Operand:X2}",
+                        AddressMode.ZeroPage => $"${i.Operand:X2}",
+                        AddressMode.ZeroPageX => $"${i.Operand:X2},X",
+                        AddressMode.Absolute => $"${i.Operand:X4}",
+                        AddressMode.AbsoluteX => $"${i.Operand:X4},X",
+                        AddressMode.AbsoluteY => $"${i.Operand:X4},Y",
+                        AddressMode.IndirectY => $"(${i.Operand:X2}),Y",
+                        AddressMode.Relative => $"{(sbyte)(byte)i.Operand:+0;-0;+0}",
+                        _ => "?"
+                    };
+                    Console.Error.WriteLine($"  ${addr:X4}: {name} {operand}".TrimEnd());
+                    break;
+                case StreamEntryKind.Label:
+                    Console.Error.WriteLine($"{entry.LabelName}:");
+                    break;
+                case StreamEntryKind.BranchToLabel:
+                    Console.Error.WriteLine($"  ${addr:X4}: {FormatOpcode(entry.BranchOpcode)} -> {entry.BranchTarget}");
+                    break;
+                case StreamEntryKind.Data:
+                    Console.Error.WriteLine($"  ${addr:X4}: .byte [{entry.RawData?.Length ?? 0}]");
+                    break;
+            }
+            addr += (ushort)entry.Size;
+        }
+    }
+
+    private static string FormatOpcode(byte op) => op switch
+    {
+        0xA9 or 0xA5 or 0xAD or 0xBD or 0xB9 or 0xB1 or 0xB5 => "LDA",
+        0x85 or 0x8D or 0x9D or 0x91 or 0x95 => "STA",
+        0xA2 or 0xA6 => "LDX", 0xA0 or 0xA4 => "LDY",
+        0x86 => "STX", 0x84 => "STY",
+        0x69 or 0x65 or 0x6D => "ADC", 0xE9 or 0xE5 => "SBC",
+        0x18 => "CLC", 0x38 => "SEC",
+        0xC9 or 0xC5 => "CMP", 0xE0 => "CPX", 0xC0 => "CPY",
+        0x4C => "JMP", 0x20 => "JSR", 0x60 => "RTS",
+        0xD0 => "BNE", 0xF0 => "BEQ", 0x90 => "BCC", 0xB0 => "BCS", 0x30 => "BMI", 0x10 => "BPL",
+        0xAA => "TAX", 0xA8 => "TAY", 0x8A => "TXA", 0x98 => "TYA",
+        0x48 => "PHA", 0x68 => "PLA", 0x08 => "PHP", 0x28 => "PLP",
+        0xE8 => "INX", 0xC8 => "INY", 0xCA => "DEX", 0x88 => "DEY",
+        0xE6 => "INC", 0xC6 => "DEC",
+        0x06 or 0x0A => "ASL", 0x46 or 0x4A => "LSR", 0x26 => "ROL", 0x66 or 0x6A => "ROR",
+        0x29 or 0x25 or 0x31 => "AND", 0x09 or 0x05 or 0x11 => "ORA", 0x49 or 0x45 => "EOR",
+        0xEA => "NOP", 0x78 => "SEI", 0x58 => "CLI",
+        _ => $"?{op:X2}"
+    };
+
+    // --- Forward references ---
+
+    public void EmitJmpForward(string label)
+    {
+        var id = NextId();
+        _fixups.Add((id, label, FixupKind.Word));
+        Append(StreamEntry.Instr(id, 0x4C, AddressMode.Absolute, 0x0000));
+    }
+
+    public void EmitJsrForward(string label)
+    {
+        var id = NextId();
+        _fixups.Add((id, label, FixupKind.Word));
+        Append(StreamEntry.Instr(id, 0x20, AddressMode.Absolute, 0x0000));
+    }
+
+    public void EmitStoreAddrForward(string label, ushort destLo, ushort destHi)
+    {
+        // LDA #<label
+        var id1 = NextId();
+        _fixups.Add((id1, label, FixupKind.LoByte));
+        Append(StreamEntry.Instr(id1, 0xA9, AddressMode.Immediate, 0x00));
+        // STA destLo
+        Append(StreamEntry.Instr(NextId(), 0x8D, AddressMode.Absolute, destLo));
+        // LDA #>label
+        var id2 = NextId();
+        _fixups.Add((id2, label, FixupKind.HiByte));
+        Append(StreamEntry.Instr(id2, 0xA9, AddressMode.Immediate, 0x00));
+        // STA destHi
+        Append(StreamEntry.Instr(NextId(), 0x8D, AddressMode.Absolute, destHi));
+    }
+
+    public void EmitLdaAbsoluteXForward(string label, int offset = 0)
+    {
+        var id = NextId();
+        _fixups.Add((id, label, FixupKind.Word));
+        Append(StreamEntry.Instr(id, 0xBD, AddressMode.AbsoluteX, (ushort)offset));
+    }
+
+    // --- Label resolution ---
+
+    public sbyte BranchOffset(string label)
+    {
+        var targetAddr = GetLabel(label);
+        var offset = targetAddr - CurrentAddress;
+        if (offset is < -128 or > 127)
+            throw new InvalidOperationException($"Branch to '{label}' out of range: {offset}");
+        return (sbyte)offset;
+    }
+
+    public ushort GetLabel(string name)
+    {
+        if (!_labelEntryIds.TryGetValue(name, out var labelId))
+            throw new InvalidOperationException($"Undefined label: {name}");
+        // Sum sizes of all entries before the label entry
+        ushort addr = baseAddress;
+        foreach (var entry in _entries)
+        {
+            if (entry.Id == labelId) break;
+            addr += (ushort)entry.Size;
+        }
+        return addr;
+    }
+
+    // --- Fixup resolution ---
+
+    public void ResolveFixups()
+    {
+        // Phase 1: Resolve BranchToLabel entries.
+        // Expand any that don't fit in -128..+127 to inverted-branch + JMP.
+        // Iterate until stable (expansion can push other branches out of range).
+        bool expanded;
+        do
+        {
+            expanded = false;
+            // Build byte offset map
+            var offsets = BuildOffsetMap();
+            // Build label-name-to-index map
+            var labelIndices = BuildLabelIndexMap();
+
+            for (var i = 0; i < _entries.Count; i++)
+            {
+                var entry = _entries[i];
+                if (entry.Kind != StreamEntryKind.BranchToLabel) continue;
+
+                if (!labelIndices.TryGetValue(entry.BranchTarget!, out var labelIdx))
+                    throw new InvalidOperationException($"Unresolved branch label: {entry.BranchTarget}");
+
+                // Offset is from the byte AFTER the branch instruction (PC + 2)
+                var branchEnd = offsets[i] + 2;
+                var targetOffset = offsets[labelIdx];
+                var relOffset = targetOffset - branchEnd;
+
+                if (relOffset is >= -128 and <= 127)
+                {
+                    // Fits: convert to a concrete branch instruction
+                    _entries[i] = StreamEntry.Instr(entry.Id, entry.BranchOpcode, AddressMode.Relative,
+                        (ushort)(byte)(sbyte)relOffset);
+                }
+                else
+                {
+                    // Doesn't fit: expand to inverted-branch(2) + JMP(3)
+                    var invertedOpcode = InvertBranch(entry.BranchOpcode);
+                    // The inverted branch skips 3 bytes (the JMP)
+                    _entries[i] = StreamEntry.Instr(entry.Id, invertedOpcode, AddressMode.Relative, 3);
+                    // Insert a JMP forward to the target label
+                    var jmpId = NextId();
+                    _fixups.Add((jmpId, entry.BranchTarget!, FixupKind.Word));
+                    _entries.Insert(i + 1, StreamEntry.Instr(jmpId, 0x4C, AddressMode.Absolute, 0x0000));
+                    expanded = true;
+                    break; // Restart — indices have shifted
+                }
+            }
+        } while (expanded);
+
+        // Phase 2: Resolve all word/lobyte/hibyte fixups
+        var idToIndex = new Dictionary<int, int>();
+        for (var i = 0; i < _entries.Count; i++)
+            idToIndex[_entries[i].Id] = i;
+
+        var finalOffsets = BuildOffsetMap();
+
+        foreach (var (entryId, label, kind) in _fixups)
+        {
+            if (!_labelEntryIds.TryGetValue(label, out var labelId))
+                throw new InvalidOperationException($"Unresolved label: {label}");
+            if (!idToIndex.TryGetValue(labelId, out var labelIdx))
+                throw new InvalidOperationException($"Label entry not found: {label}");
+            var labelAddr = (ushort)(baseAddress + finalOffsets[labelIdx]);
+
+            if (!idToIndex.TryGetValue(entryId, out var instrIdx))
+                throw new InvalidOperationException($"Fixup entry not found for label: {label}");
+            var entry = _entries[instrIdx];
+            if (entry.Kind != StreamEntryKind.Instruction)
+                throw new InvalidOperationException($"Fixup entry {entryId} is not an instruction");
+
+            var instr = entry.Instruction;
+            var newOperand = kind switch
+            {
+                FixupKind.Word => labelAddr,
+                FixupKind.LoByte => (ushort)(labelAddr & 0xFF),
+                FixupKind.HiByte => (ushort)(labelAddr >> 8),
+                _ => throw new InvalidOperationException($"Unknown fixup kind: {kind}")
+            };
+
+            _entries[instrIdx] = StreamEntry.Instr(entry.Id, instr.Opcode, instr.Mode, newOperand);
+        }
+
+        // Recalculate byte length (branch expansions may have changed it)
+        _byteLength = 0;
+        foreach (var entry in _entries)
+            _byteLength += entry.Size;
+    }
+
+    private int[] BuildOffsetMap()
+    {
+        var offsets = new int[_entries.Count];
+        var offset = 0;
+        for (var i = 0; i < _entries.Count; i++)
+        {
+            offsets[i] = offset;
+            offset += _entries[i].Size;
+        }
+        return offsets;
+    }
+
+    private Dictionary<string, int> BuildLabelIndexMap()
+    {
+        var map = new Dictionary<string, int>();
+        for (var i = 0; i < _entries.Count; i++)
+        {
+            if (_entries[i].Kind == StreamEntryKind.Label)
+                map[_entries[i].LabelName!] = i;
+        }
+        return map;
+    }
+
+    private static byte InvertBranch(byte opcode) => opcode switch
+    {
+        0xD0 => 0xF0, // BNE → BEQ
+        0xF0 => 0xD0, // BEQ → BNE
+        0x90 => 0xB0, // BCC → BCS
+        0xB0 => 0x90, // BCS → BCC
+        0x30 => 0x10, // BMI → BPL
+        0x10 => 0x30, // BPL → BMI
+        _ => throw new InvalidOperationException($"Cannot invert branch opcode: 0x{opcode:X2}")
+    };
+
+    // --- Optimization ---
+
+    /// <summary>
+    /// Run peephole optimization passes over the instruction stream.
+    /// Recalculates _byteLength after modifications.
+    /// </summary>
+    public void Optimize()
+    {
+        PeepholeRemovals += PeepholeOptimizer.Optimize(_entries);
+
+        // Recalculate byte length
+        _byteLength = 0;
+        foreach (var entry in _entries)
+            _byteLength += entry.Size;
+    }
+
+    // --- Serialization ---
+
+    public byte[] ToArray()
+    {
+        var result = new List<byte>(_byteLength);
+        foreach (var entry in _entries)
+        {
+            switch (entry.Kind)
+            {
+                case StreamEntryKind.Instruction:
+                    EncodeInstruction(entry.Instruction, result);
+                    break;
+                case StreamEntryKind.Data:
+                    if (entry.RawData != null)
+                        result.AddRange(entry.RawData);
+                    break;
+                case StreamEntryKind.Label:
+                    break;
+            }
+        }
+        return [.. result];
+    }
+
+    private static void EncodeInstruction(Instruction instr, List<byte> output)
+    {
+        output.Add(instr.Opcode);
+        switch (instr.Mode)
+        {
+            case AddressMode.Implied:
+            case AddressMode.Accumulator:
+                break;
+            case AddressMode.Immediate:
+            case AddressMode.ZeroPage:
+            case AddressMode.ZeroPageX:
+            case AddressMode.IndirectY:
+            case AddressMode.Relative:
+                output.Add((byte)(instr.Operand & 0xFF));
+                break;
+            case AddressMode.Absolute:
+            case AddressMode.AbsoluteX:
+            case AddressMode.AbsoluteY:
+                output.Add((byte)(instr.Operand & 0xFF));
+                output.Add((byte)(instr.Operand >> 8));
+                break;
+        }
+    }
+}

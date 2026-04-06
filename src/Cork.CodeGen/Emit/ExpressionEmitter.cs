@@ -55,7 +55,7 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                          fesv2.FieldBases.TryGetValue(ident.Name, out var fieldBase2))
                 {
                     ctx.Buffer.EmitLdxZeroPage(fesv2.IndexZp);
-                    ctx.Buffer.EmitByte(0xB5); ctx.Buffer.EmitByte(fieldBase2); // LDA zp,X
+                    ctx.Buffer.EmitLdaZeroPageX(fieldBase2);
                 }
                 else if (ctx.Symbols.TryGetConstant(ident.Name, out var constVal))
                     ctx.Buffer.EmitLdaImmediate((byte)constVal);
@@ -113,7 +113,7 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 {
                     EmitExprToA(zpIndexExpr.Index);
                     ctx.Buffer.EmitTax();
-                    ctx.Buffer.EmitByte(0xB5); ctx.Buffer.EmitByte(zpBase); // LDA zp,X
+                    ctx.Buffer.EmitLdaZeroPageX(zpBase);
                 }
                 break;
             }
@@ -232,7 +232,7 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 EmitExprToA(bin.Left);
                 if (TryFoldConstant(bin.Right, out var shlCount))
                     for (var i = 0; i < shlCount; i++)
-                        ctx.Buffer.EmitByte(0x0A); // ASL A
+                        ctx.Buffer.EmitAslAccumulator();
                 else
                     throw new InvalidOperationException("Shift count must be constant");
                 break;
@@ -240,7 +240,7 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 EmitExprToA(bin.Left);
                 if (TryFoldConstant(bin.Right, out var shrCount))
                     for (var i = 0; i < shrCount; i++)
-                        ctx.Buffer.EmitByte(0x4A); // LSR A
+                        ctx.Buffer.EmitLsrAccumulator();
                 else
                     throw new InvalidOperationException("Shift count must be constant");
                 break;
@@ -294,13 +294,11 @@ public sealed class ExpressionEmitter(EmitContext ctx)
     {
         if (TryFoldConstant(operand, out var constVal))
         {
-            ctx.Buffer.EmitByte(immOpcode);
-            ctx.Buffer.EmitByte((byte)constVal);
+            EmitBitwiseImm(immOpcode, (byte)constVal);
         }
         else if (operand is IdentifierExpr ident && !ctx.Symbols.IsWordVar(ident.Name))
         {
-            ctx.Buffer.EmitByte(zpOpcode);
-            ctx.Buffer.EmitByte(ctx.Symbols.GetLocal(ident.Name));
+            EmitBitwiseZp(zpOpcode, ctx.Symbols.GetLocal(ident.Name));
         }
         else
         {
@@ -309,8 +307,29 @@ public sealed class ExpressionEmitter(EmitContext ctx)
             EmitExprToA(operand);
             ctx.Buffer.EmitStaZeroPage(EmitContext.ZpTemp);
             ctx.Buffer.EmitPla();
-            ctx.Buffer.EmitByte(zpOpcode);
-            ctx.Buffer.EmitByte(EmitContext.ZpTemp);
+            EmitBitwiseZp(zpOpcode, EmitContext.ZpTemp);
+        }
+    }
+
+    private void EmitBitwiseImm(byte opcode, byte value)
+    {
+        switch (opcode)
+        {
+            case 0x29: ctx.Buffer.EmitAndImmediate(value); break;
+            case 0x09: ctx.Buffer.EmitOraImmediate(value); break;
+            case 0x49: ctx.Buffer.EmitEorImmediate(value); break;
+            default: throw new InvalidOperationException($"Unknown bitwise imm opcode: 0x{opcode:X2}");
+        }
+    }
+
+    private void EmitBitwiseZp(byte opcode, byte addr)
+    {
+        switch (opcode)
+        {
+            case 0x25: ctx.Buffer.EmitAndZeroPage(addr); break;
+            case 0x05: ctx.Buffer.EmitOraZeroPage(addr); break;
+            case 0x45: ctx.Buffer.EmitEorZeroPage(addr); break;
+            default: throw new InvalidOperationException($"Unknown bitwise zp opcode: 0x{opcode:X2}");
         }
     }
 
@@ -439,8 +458,7 @@ public sealed class ExpressionEmitter(EmitContext ctx)
         {
             ctx.Buffer.EmitLdxZeroPage(fesv.IndexZp);
             // LDA zp,X — zero-page indexed
-            ctx.Buffer.EmitByte(0xB5); // LDA zp,X opcode
-            ctx.Buffer.EmitByte(fieldBase);
+            ctx.Buffer.EmitLdaZeroPageX(fieldBase);
             return true;
         }
         return false;

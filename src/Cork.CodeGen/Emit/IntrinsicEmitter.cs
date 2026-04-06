@@ -419,7 +419,7 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
                     var sa = (ushort)(0x0400 + strPos);
                     ctx.Buffer.EmitLdxImmediate(0);
                     // LDA zp,X = $B5 zp (2 bytes)
-                    ctx.Buffer.EmitByte(0xB5); ctx.Buffer.EmitByte(strInfo.ZpBase);
+                    ctx.Buffer.EmitLdaZeroPageX(strInfo.ZpBase);
                     ctx.Buffer.EmitStaAbsoluteX(sa);
                     ctx.Buffer.EmitInx();
                     ctx.Buffer.EmitCpxImmediate((byte)strInfo.Length);
@@ -440,7 +440,7 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
                     ctx.Buffer.EmitLdxImmediate(0);
                     ctx.Buffer.EmitLdyImmediate(0);
                     // LDA zp,X = $B5 zp (2 bytes)
-                    ctx.Buffer.EmitByte(0xB5); ctx.Buffer.EmitByte(strInfo.ZpBase);
+                    ctx.Buffer.EmitLdaZeroPageX(strInfo.ZpBase);
                     ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
                     ctx.Buffer.EmitInx();
                     ctx.Buffer.EmitIny();

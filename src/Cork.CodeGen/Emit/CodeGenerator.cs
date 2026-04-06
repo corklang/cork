@@ -57,8 +57,11 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         var constDataSize = dataBytes.Count;
 
         // First pass: measure code size (sprite pointers registered as placeholder 0)
-        var measuredSize = EmitAll(program, scenes, globalVars, dataNames, constArraySizes,
-            inlineSprites, reachable.Methods, usesRandom, codeBase, 0xFFFF).Length;
+        var measuredBytes = EmitAll(program, scenes, globalVars, dataNames, constArraySizes,
+            inlineSprites, reachable.Methods, usesRandom, codeBase, 0xFFFF);
+        var measuredSize = measuredBytes.Length;
+        if (Environment.GetEnvironmentVariable("CORK_DUMP_IR") == "1")
+            Console.Error.WriteLine($"  [debug] measuredSize={measuredSize}");
 
         // Second pass setup: compute data addresses
         var dataStart = (ushort)(codeBase + measuredSize);
@@ -70,11 +73,17 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         var measureCtx = CreateContext(codeBase, dataAddresses);
         RegisterAllTypes(measureCtx, program, globalVars, constArraySizes, inlineSprites, reachable.Methods);
         EmitCode(measureCtx, program, scenes, globalVars, entryScene, reachable.Methods, usesRandom);
+        measureCtx.Buffer.Optimize();
+        measureCtx.Buffer.ResolveFixups();
+        if (Environment.GetEnvironmentVariable("CORK_DUMP_IR") == "1")
+            Console.Error.WriteLine($"  [debug] measureCtx.Length={measureCtx.Buffer.Length}");
         var measureInlineData = measureCtx.FinalizeInlineData(
             (ushort)(codeBase + measureCtx.Buffer.Length + constDataSize));
 
         // Compute aligned sprite positions (after code + const data + inline strings)
         var spriteSegStart = (ushort)(codeBase + measuredSize + constDataSize + measureInlineData.Length);
+        if (Environment.GetEnvironmentVariable("CORK_DUMP_IR") == "1")
+            Console.Error.WriteLine($"  [debug] spriteSegStart=${spriteSegStart:X4} constDataSize={constDataSize} inlineDataLen={measureInlineData.Length}");
         var (spriteData, spritePointers) = BuildAlignedSpriteData(inlineSprites, spriteSegStart);
 
         // Final pass: emit with real sprite pointer values and debug info
@@ -87,6 +96,9 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
             ctx.Symbols.AddConstantNoShadowCheck(ptrName, spritePointers[dataName]);
         }
         EmitCode(ctx, program, scenes, globalVars, entryScene, reachable.Methods, usesRandom);
+        ctx.Buffer.Optimize();
+        if (Environment.GetEnvironmentVariable("CORK_DUMP_IR") == "1")
+            ctx.Buffer.DumpInstructions();
 
         if (ctx.Errors.Count > 0)
             throw new AggregateCompileError(ctx.Errors);
@@ -96,6 +108,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         var inlineDataStart = (ushort)(codeBase + codeSize + constDataSize);
         var inlineData = ctx.FinalizeInlineData(inlineDataStart);
         ctx.Buffer.ResolveFixups();
+        ctx.Debug?.ResolveAddresses(ctx.Buffer);
 
         // Extract variable debug info from symbol table
         if (ctx.Debug != null)
@@ -124,6 +137,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
         // Combine code + const data + inline data + aligned sprite data
         var code = ctx.Buffer.ToArray();
+        if (Environment.GetEnvironmentVariable("CORK_DUMP_IR") == "1")
+            Console.Error.WriteLine($"  [debug] final: codeSize(Length)={codeSize} code.Length(ToArray)={code.Length} spriteData.Length={spriteData.Length} constDataSize={constDataSize} inlineData={inlineData.Length}");
         var result = new byte[code.Length + constDataSize + inlineData.Length + spriteData.Length];
         code.CopyTo(result, 0);
         dataBytes.CopyTo(result.AsSpan()[code.Length..]);
@@ -241,6 +256,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
         var entryScene = scenes.First(s => s.IsEntry);
         EmitCode(ctx, program, scenes, globalVars, entryScene, reachableMethods, usesRandom);
+        ctx.Buffer.Optimize();
+        ctx.Buffer.ResolveFixups();
         return ctx.Buffer.ToArray();
     }
 
@@ -298,7 +315,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
     {
         var label = $"_method_{gm.SelectorName}";
         ctx.Buffer.DefineLabel(label);
-        ctx.Debug?.OpenScope(ctx.Debug.Methods, gm.SelectorName, ctx.Buffer.CurrentAddress);
+        var gmStartMarker = ctx.Buffer.EmitDebugMarker();
+        ctx.Debug?.OpenScope(ctx.Debug.Methods, gm.SelectorName, gmStartMarker);
         // Each method gets its own non-overlapping local zone so nested calls work.
         ctx.Symbols.PrepareMethodLocals();
         ctx.Symbols.InstallMethodParamLocals(gm.SelectorName, gm.Parameters);
@@ -306,7 +324,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         ctx.Symbols.RemoveMethodParamLocals(gm.Parameters);
         ctx.Symbols.FinalizeMethodLocals();
         ctx.Buffer.EmitRts();
-        ctx.Debug?.CloseScope(ctx.Debug.Methods, gm.SelectorName, ctx.Buffer.CurrentAddress);
+        var gmEndMarker = ctx.Buffer.EmitDebugMarker();
+        ctx.Debug?.CloseScope(ctx.Debug.Methods, gm.SelectorName, gmEndMarker);
     }
 
     /// <summary>

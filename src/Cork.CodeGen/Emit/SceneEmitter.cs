@@ -18,7 +18,8 @@ public sealed class SceneEmitter(EmitContext ctx)
         _currentSceneName = scene.Name;
 
         ctx.Buffer.DefineLabel($"_scene_{scene.Name}");
-        ctx.Debug?.OpenScope(ctx.Debug.Scenes, scene.Name, ctx.Buffer.CurrentAddress);
+        var sceneStartMarker = ctx.Buffer.EmitDebugMarker();
+        ctx.Debug?.OpenScope(ctx.Debug.Scenes, scene.Name, sceneStartMarker);
 
         var sceneVarNames = new HashSet<string>();
         foreach (var member in scene.Members)
@@ -114,7 +115,8 @@ public sealed class SceneEmitter(EmitContext ctx)
         if (rasterBlocks.Count > 0)
             EmitRasterHandler(rasterBlocks, scene.Name);
 
-        ctx.Debug?.CloseScope(ctx.Debug.Scenes, scene.Name, ctx.Buffer.CurrentAddress);
+        var sceneEndMarker = ctx.Buffer.EmitDebugMarker();
+        ctx.Debug?.CloseScope(ctx.Debug.Scenes, scene.Name, sceneEndMarker);
     }
 
     public void EmitHardwareBlock(HardwareBlockNode hw)
@@ -347,7 +349,7 @@ public sealed class SceneEmitter(EmitContext ctx)
         if (initX > 255)
         {
             ctx.Buffer.EmitLdaAbsolute(0xD010);
-            ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit); // ORA #bit
+            ctx.Buffer.EmitOraImmediate(bit);
             ctx.Buffer.EmitStaAbsolute(0xD010);
         }
 
@@ -364,7 +366,7 @@ public sealed class SceneEmitter(EmitContext ctx)
 
         // Enable sprite (track for cleanup on scene exit)
         ctx.Buffer.EmitLdaAbsolute(0xD015);
-        ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit); // ORA #bit
+        ctx.Buffer.EmitOraImmediate(bit);
         ctx.Buffer.EmitStaAbsolute(0xD015);
         ctx.DirtySpriteRegs.Add(0xD015);
 
@@ -372,7 +374,7 @@ public sealed class SceneEmitter(EmitContext ctx)
         if (multicolor)
         {
             ctx.Buffer.EmitLdaAbsolute(0xD01C);
-            ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit);
+            ctx.Buffer.EmitOraImmediate(bit);
             ctx.Buffer.EmitStaAbsolute(0xD01C);
             ctx.DirtySpriteRegs.Add(0xD01C);
         }
@@ -381,7 +383,7 @@ public sealed class SceneEmitter(EmitContext ctx)
         if (expandX)
         {
             ctx.Buffer.EmitLdaAbsolute(0xD01D);
-            ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit);
+            ctx.Buffer.EmitOraImmediate(bit);
             ctx.Buffer.EmitStaAbsolute(0xD01D);
             ctx.DirtySpriteRegs.Add(0xD01D);
         }
@@ -390,7 +392,7 @@ public sealed class SceneEmitter(EmitContext ctx)
         if (expandY)
         {
             ctx.Buffer.EmitLdaAbsolute(0xD017);
-            ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit);
+            ctx.Buffer.EmitOraImmediate(bit);
             ctx.Buffer.EmitStaAbsolute(0xD017);
             ctx.DirtySpriteRegs.Add(0xD017);
         }
@@ -399,7 +401,7 @@ public sealed class SceneEmitter(EmitContext ctx)
         if (priorityBack)
         {
             ctx.Buffer.EmitLdaAbsolute(0xD01B);
-            ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(bit);
+            ctx.Buffer.EmitOraImmediate(bit);
             ctx.Buffer.EmitStaAbsolute(0xD01B);
             ctx.DirtySpriteRegs.Add(0xD01B);
         }
@@ -440,10 +442,12 @@ public sealed class SceneEmitter(EmitContext ctx)
     {
         var label = $"_method_{method.SelectorName}";
         ctx.Buffer.DefineLabel(label);
-        ctx.Debug?.OpenScope(ctx.Debug.Methods, method.SelectorName, ctx.Buffer.CurrentAddress);
+        var methodStartMarker = ctx.Buffer.EmitDebugMarker();
+        ctx.Debug?.OpenScope(ctx.Debug.Methods, method.SelectorName, methodStartMarker);
         ctx.Statements.EmitBlock(method.Body);
         ctx.Buffer.EmitRts();
-        ctx.Debug?.CloseScope(ctx.Debug.Methods, method.SelectorName, ctx.Buffer.CurrentAddress);
+        var methodEndMarker = ctx.Buffer.EmitDebugMarker();
+        ctx.Debug?.CloseScope(ctx.Debug.Methods, method.SelectorName, methodEndMarker);
     }
 
     public void EmitVsyncWait()
@@ -471,7 +475,7 @@ public sealed class SceneEmitter(EmitContext ctx)
         ctx.Buffer.EmitLdaImmediate(firstLine);
         ctx.Buffer.EmitStaAbsolute(0xD012);
         ctx.Buffer.EmitLdaAbsolute(0xD011);
-        ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(0x7F);
+        ctx.Buffer.EmitAndImmediate(0x7F);
         ctx.Buffer.EmitStaAbsolute(0xD011);
         ctx.Buffer.EmitLdaImmediate(0x01);
         ctx.Buffer.EmitStaAbsolute(0xD01A);
