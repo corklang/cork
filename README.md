@@ -1,126 +1,139 @@
 # Cork
 
-A programming language that compiles to Commodore 64 machine code.
+**A programming language for the Commodore 64.**
 
-Cork pairs a modern developer experience with the raw power of the C64's hardware. Write expressive, structured code with structs, scenes, message-passing syntax, and fixed-point math — the compiler handles the 6510 assembly, memory layout, and hardware register juggling.
+Cork pairs a modern developer experience with the raw power of the C64's hardware. Write expressive, structured code — the compiler handles 6510 assembly, memory layout, and hardware register juggling.
+
+```
+                    ╭──────────────────────────────────╮
+   .cork source --> │  Lexer  Parser  CodeGen  Output  │ --> .prg binary
+                    ╰──────────────────────────────────╯
+                           Cork Compiler (.NET)
+```
+
+---
 
 ## Quick Start
 
+Requires [.NET 10 SDK](https://dotnet.microsoft.com/download).
+
 ```bash
-# Compile a Cork program
+# Build the compiler
+dotnet build Cork.slnx
+
+# Compile a program
 dotnet run --project src/Cork.Compiler -- samples/gravity.cork -o gravity.prg
 
 # Run in VICE emulator
 x64sc -autostart gravity.prg
 ```
 
+Publish as a native binary (AOT):
+
+```bash
+dotnet publish src/Cork.Compiler -c Release
+```
+
+---
+
 ## What Cork Looks Like
 
-```cork
-struct Ball {
-    fixed x = 100.0;
-    fixed y = 80.0;
-    sfixed dx = 0.75;
-    sfixed dy = 0.5;
+A bouncing ball with gravity, sprite pixel art, raster color bars, and joystick input — in one file:
 
-    update: {
-        x += dx;
-        y += dy;
-        if (x > 220.0) { dx = -0.75; }
-        if (x < 40.0)  { dx = 0.75; }
-        if (y > 210.0) { dy = -0.5; }
-        if (y < 60.0)  { dy = 0.5; }
-    }
-}
-
-entry scene Game {
+```
+entry scene Demo {
     hardware {
-        border: Color.black;
+        border: Color.darkGrey;
         background: Color.black;
     }
 
     sprite 0 ball {
         data: `
-            . . . . . . . . # # # # # # . . . . . . . . . .
-            . . . . . . # # # # # # # # # # . . . . . . . .
-            . . . . # # # # # # # # # # # # # # . . . . . .
-            . . # # # # # # # # # # # # # # # # # # . . . .
-            . # # # # # # # # # # # # # # # # # # # # # . .
-            # # # # # # # # # # # # # # # # # # # # # # # #
-            # # # # # # # # # # # # # # # # # # # # # # # #
-            # # # # # # # # # # # # # # # # # # # # # # # #
-            # # # # # # # # # # # # # # # # # # # # # # # #
-            # # # # # # # # # # # # # # # # # # # # # # # #
-            # # # # # # # # # # # # # # # # # # # # # # # #
-            # # # # # # # # # # # # # # # # # # # # # # # #
-            # # # # # # # # # # # # # # # # # # # # # # # #
-            # # # # # # # # # # # # # # # # # # # # # # # #
-            # # # # # # # # # # # # # # # # # # # # # # # #
+            . . . . . . . . . # # # # # # . . . . . . . . .
+            . . . . . . . # # # # # # # # # # . . . . . . .
+            . . . . . # # # # # # # # # # # # # # . . . . .
+            . . . . # # # # # # # # # # # # # # # # . . . .
+            . . . # # # # # # # # # # # # # # # # # # . . .
+            . . # # # # # # # # # # # # # # # # # # # # . .
             . # # # # # # # # # # # # # # # # # # # # # # .
-            . . # # # # # # # # # # # # # # # # # # . . . .
-            . . . . # # # # # # # # # # # # # # . . . . . .
-            . . . . . . # # # # # # # # # # . . . . . . . .
-            . . . . . . . . # # # # # # . . . . . . . . . .
-            . . . . . . . . . . . . . . . . . . . . . . . .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . # # # # # # # # # # # # # # # # # # # # # # .
+            . . # # # # # # # # # # # # # # # # # # # # . .
+            . . . # # # # # # # # # # # # # # # # # # . . .
+            . . . . . # # # # # # # # # # # # # # . . . . .
+            . . . . . . . . . # # # # # # . . . . . . . . .
         `;
+        x: 72; y: 55;
         color: Color.white;
-        x: 100; y: 80;
     }
+
+    fixed ballY = 55.0;
+    sfixed velY = 0.0;
+    sfixed gravity = 0.1;
 
     frame {
-        ball.x += dx;
-        ball.y += dy;
+        velY += gravity;
+        ballY += velY;
+
+        if (ballY > 231.0) {
+            ballY = 231.0;
+            velY *= -0.7;           // dampened bounce
+        }
+
+        poke: 0xD001 value: ballY;  // integer part -> sprite Y
+
+        if (joystick.port2.left)  { ball.x -= 1; }
+        if (joystick.port2.right) { ball.x += 1; }
+        if (joystick.port2.fire)  { velY = -4.0; }
     }
 
-    raster 100 {
-        poke: 0xD020 value: 6;
-    }
-
-    raster 200 {
-        poke: 0xD020 value: 0;
-    }
+    raster 100 { poke: 0xD020 value: 6; }  // gold bar
+    raster 200 { poke: 0xD020 value: 0; }  // back to black
 }
 ```
 
+The compiler turns this into a ready-to-run `.prg` with BASIC stub, 6510 machine code, sprite data, and IRQ chain — no manual assembly required.
+
+---
+
 ## Design Philosophy
 
-- **Expression over ceremony** — Code should read clearly and feel good to write.
-- **Compile-time everything** — Type checks, memory validation, and shadowing prevention are all resolved at compile time. Zero runtime overhead for safety.
-- **Fully static memory** — No heap, no garbage collection, no reference counting. Every variable's size and location is known at compile time.
-- **The hardware is the SDK** — VIC-II, SID, CIA, sprites, and raster interrupts surface as language constructs, not a bolted-on library.
-- **Scenes as architecture** — Programs are organized into scenes (title screen, game level, etc.) that the compiler packs and validates. If it doesn't fit in 64KB, you get a compiler error, not a runtime crash.
-- **Dot means data, colon means code** — `enemy.health` is always a direct field read. `enemy update:` is always a method call. No hidden costs.
+| Principle | What it means |
+|:--|:--|
+| **Expression over ceremony** | Code should read clearly and feel good to write |
+| **Compile-time everything** | Type checks, memory validation, shadowing prevention. Zero runtime overhead |
+| **Fully static memory** | No heap, no GC, no refcounting. All lifetimes known at compile time |
+| **The hardware is the SDK** | VIC-II, SID, CIA, sprites, raster interrupts are language constructs |
+| **Scenes as architecture** | Programs organized into scenes the compiler packs and validates |
+| **Dot means data, colon means code** | `enemy.health` reads a field. `enemy update:` calls a method. No hidden costs |
 
-## Syntax
+---
 
-Cork blends C-style declarations with Smalltalk/Objective-C message passing.
+## Language Overview
 
-### Variables and Types
+### Types
 
-```cork
+```
 byte x = 5;              // unsigned 8-bit (0-255)
 sbyte velocity = -2;     // signed 8-bit (-128 to 127)
-word score = 1000;        // unsigned 16-bit (0-65535)
+word score = 1000;       // unsigned 16-bit (0-65535)
 fixed spriteX = 160.0;   // unsigned 8.8 fixed-point
-sfixed speed = -1.5;      // signed 8.8 fixed-point
-var inferred = 42;        // type inferred from literal
-const byte MAX = 200;     // compile-time constant (zero cost)
+sfixed speed = -1.5;     // signed 8.8 fixed-point
+bool alive = true;
+string[16] name = "PLAYER ONE";
+var inferred = 42;       // type inferred from literal
+const byte MAX = 200;    // compile-time constant (zero cost)
 ```
 
 ### Message Passing
 
-The colon means "I'm calling something." Always.
+Cork uses Smalltalk/Objective-C-style method calls. The colon means "I'm calling something." Always.
 
-```cork
-// Method calls with arguments
+```
 enemy moveTo: 100 y: 50;
 player takeDamage: weapon.power + bonus;
-
-// No-arg calls
 enemy update:;
-Music stop:;
 
-// In expressions (parens delimit)
 var d = (enemy distanceFrom: player);
 ```
 
@@ -128,101 +141,89 @@ var d = (enemy distanceFrom: player);
 
 Value types with methods. No inheritance, no heap — composition for reuse.
 
-```cork
-struct Player {
-    byte x = 160;
-    byte health = 5;
-
-    moveLeft: {
-        x -= 1;
-    }
-
-    moveRight: {
-        x += 1;
-    }
+```
+struct Position {
+    byte x = 0;
+    byte y = 0;
 }
 
-Player player;
-player moveLeft:;    // method call
-player.x;            // field access
+struct Enemy {
+    Position pos;
+    byte health = 3;
+
+    takeDamage: (byte amount) {
+        health -= amount;
+    }
+}
 ```
 
-### Scenes
+### Scenes and Hardware
 
-The primary architectural unit. Each scene is a self-contained state with its own hardware setup, variables, and lifecycle.
+Each scene is a self-contained state with its own hardware setup, variables, and lifecycle.
 
-```cork
+```
 entry scene TitleScreen {
     hardware {
         border: Color.blue;
         background: Color.black;
     }
 
+    enter { printAt: 175 text: "PRESS FIRE"; }
+
     frame {
-        if (joystick.port2.fire) {
-            go GameLevel;
-        }
+        if (joystick.port2.fire) { go GameLevel; }
     }
 }
+```
 
-scene GameLevel {
-    hardware {
-        border: Color.black;
-        background: Color.black;
-    }
+### Sprites
 
-    enter { clearScreen:; }
-    frame { /* game logic */ }
-    exit { /* cleanup */ }
+Inline pixel art with `#`/`.` for hi-res and `1`/`2`/`3`/`.` for multicolor. The compiler handles VIC-II bank placement, pointer registers, and auto-sync.
+
+```
+sprite 1 alien {
+    data: `
+        .   .   2   2   2   2   2   2   .   .   .   .
+        .   2   1   1   2   2   1   1   2   .   .   .
+        2   2   2   2   2   2   2   2   2   2   .   .
+        2   2   3   2   2   2   2   3   2   2   .   .
+        2   2   2   3   3   3   3   2   2   2   .   .
+    `;
+    x: 100; y: 80;
+    color: Color.lightGreen;
+    multicolor: true;
 }
 ```
 
 ### Raster Interrupts
 
-Declare raster blocks in a scene. The compiler generates the full IRQ chain — CIA setup, vector installation, dispatch, register save/restore.
+Declare raster blocks — the compiler generates the full IRQ chain (CIA setup, vector installation, dispatch, register save/restore).
 
-```cork
-raster 50 {
-    poke: 0xD020 value: 2;   // red border
-    poke: 0xD021 value: 2;
-}
-
-raster 200 {
-    poke: 0xD020 value: 0;   // black border
-    poke: 0xD021 value: 0;
-}
+```
+raster 50  { poke: 0xD020 value: 2; }   // red
+raster 150 { poke: 0xD020 value: 6; }   // blue
+raster 250 { poke: 0xD020 value: 0; }   // black
 ```
 
 ### Control Flow
 
-```cork
-// For loops
+```
 for (byte i = 0; i < 40; i += 1) {
     poke: 0x0400 + i value: 32;
 }
 
-// Switch (no fallthrough by default)
 switch (gameState) {
     case State.playing: updateGame:;
     case State.paused:  drawPause:;
-}
-
-// Expression switch
-switch (true) {
-    case health < 10: flashWarning:;
-    case health < 30: showDamage:;
-    default:          showNormal:;
+    default:            showMenu:;
 }
 ```
 
 ### Enums
 
-```cork
+```
 enum State : byte {
-    title = 0,
-    playing = 1,
-    paused = 2,
-    gameover = 3
+    title, playing, paused, gameover
 }
 
 flags enum SpriteFlags : byte {
@@ -234,9 +235,9 @@ flags enum SpriteFlags : byte {
 
 ### Fixed-Point Math
 
-8.8 fixed-point for sub-pixel movement. The compiler includes a runtime multiply library (only emitted when used).
+8.8 fixed-point for sub-pixel movement. The runtime multiply library is only emitted when used.
 
-```cork
+```
 fixed ballY = 60.0;
 sfixed velY = 0.0;
 sfixed gravity = 0.1;
@@ -244,101 +245,90 @@ sfixed gravity = 0.1;
 velY += gravity;            // smooth acceleration
 ballY += velY;              // sub-pixel position
 velY *= -0.9;               // signed multiply with dampening
-poke: 0xD001 value: ballY;  // integer part used for sprite position
+poke: 0xD001 value: ballY;  // integer part -> sprite Y
 ```
 
-## Compiler Output
+---
 
-| Format | Description |
-|--------|-------------|
-| `.prg` | Standard C64 program with BASIC SYS stub |
+## Standard Library
 
-The compiler generates a complete, ready-to-run C64 binary: BASIC stub for auto-start, 6510 machine code, data section, and runtime library (only the parts you use).
+Modular Cork files you can import:
+
+| Module | What it provides |
+|:--|:--|
+| `screen` | `clearScreen:`, `fillScreen:`, `setChar:`, `hline:`, `vline:`, `drawBox:` |
+| `color` | `setBorderColor:`, `setBackgroundColor:` |
+| `math` | `abs:`, `min:and:`, `max:and:`, `clamp:low:high:`, `lerp:to:t:` |
+| `input` | `waitForFire:`, `waitForJoystick:`, `delay:` |
+| `keyboard` | Direct CIA1 matrix scanning, PETSCII key constants |
+| `print` | `printByte:at:`, `printHex:at:`, `printWord:at:` |
+| `bitmap` | Bitmap mode helpers, `plotPixel`, `clearPixel` |
+| `scroll` | `scrollUp:`, `shiftRowLeft:`, `shiftRowRight:` |
+| `sprite` | Hardware sprite utilities |
+| `random` | Random number generation |
+| `memory` | Memory utilities |
+
+---
 
 ## What Cork Does NOT Have
 
 | Feature | Why |
-|---------|-----|
-| Classes / Inheritance | Structs + composition. Simpler, no vtable overhead. |
-| Heap / GC / Refcounting | Fully static memory. All lifetimes known at compile time. |
-| Null | Every value always exists. Use `bool active` patterns. |
-| Inline assembly | The language should be expressive enough without it. |
-| Generics | Complexity not justified for 8-bit target. |
-| Lambdas | Runtime cost too high on a 1 MHz CPU. |
-| `this` keyword | Fields are directly in scope. No shadowing allowed. |
+|:--|:--|
+| Classes / Inheritance | Structs + composition. Simpler, no vtable overhead |
+| Heap / GC / Refcounting | Fully static memory. All lifetimes known at compile time |
+| Null | Every value always exists. Use `bool active` patterns |
+| Inline assembly | The language should be expressive enough without it |
+| Generics | Complexity not justified for 8-bit target |
+| Lambdas | Runtime cost too high on a 1 MHz CPU |
+| `this` keyword | Fields are directly in scope. No shadowing allowed |
 
-## Building the Compiler
+---
 
-Requires .NET 10 SDK.
+## Samples
 
-```bash
-dotnet build Cork.slnx
-dotnet test --solution Cork.slnx --ignore-exit-code 8
-```
+The [`samples/`](samples/) directory contains 33 example programs:
 
-The compiler is AOT-compatible — publish as a native binary:
+| | | |
+|:--|:--|:--|
+| **Basics** | **Hardware** | **Advanced** |
+| `hello` — text output | `sprite` — joystick-controlled sprite | `gravity` — physics with fixed-point |
+| `joystick` — joystick input | `spritepattern` — inline pixel art | `multicolor` — 4-color sprites + collision |
+| `forloop` — loops, break, continue | `raster` — IRQ color bars | `gfxmodes` — all 5 VIC-II modes |
+| `enumswitch` — enums and switch | `keyboard` — CIA matrix scanning | `pixeldemo` — bitmap pixel plotting |
+| `structs` — fields and methods | `strings` — text and screen codes | `combined` — multi-scene game |
+| `composition` — nested structs | `imports` — modular source files | `sinecurve` — 320-point sine lookup |
+| `fixedpoint` — sub-pixel movement | `scroll` — hardware scrolling | `arrayparam` — pass-by-reference |
 
-```bash
-dotnet publish src/Cork.Compiler -c Release
-```
-
-## Sample Programs
-
-| Sample | Description |
-|--------|-------------|
-| `hello.cork` | Hello World — write text to screen |
-| `joystick.cork` | Move a character with the joystick |
-| `scenes.cork` | Two scenes with transitions and global state |
-| `structs.cork` | Struct with fields and methods |
-| `composition.cork` | Nested struct composition |
-| `structinit.cork` | Struct initializer syntax |
-| `word.cork` | 16-bit arithmetic, full-screen movement |
-| `forloop.cork` | For loops, break, continue |
-| `foreach.cork` | For-each on arrays, structs, strings |
-| `enumswitch.cork` | Enums and switch statements |
-| `signed.cork` | Signed byte for velocity |
-| `fixedpoint.cork` | Smooth sprite bouncing with fixed-point |
-| `casting.cork` | Type casting between byte/word/fixed |
-| `returnval.cork` | Methods with return values |
-| `gravity.cork` | Physics: gravity, dampened bouncing, sfixed multiply |
-| `raster.cork` | Raster interrupt color bars |
-| `sprite.cork` | Hardware sprite with joystick control |
-| `spriteblock.cork` | Declarative sprite blocks with auto-sync |
-| `spritepattern.cork` | Inline sprite pixel art with backtick syntax |
-| `multicolor.cork` | Multicolor sprites (4 colors, 12x21 pixels) |
-| `strings.cork` | String variables, printAt, screen codes |
-| `stringparam.cork` | Pass strings by reference to methods |
-| `arrayparam.cork` | Pass arrays by reference to methods |
-| `imports.cork` | File imports for shared code |
-| `gfxmodes.cork` | All 5 VIC-II graphics modes |
-| `combined.cork` | Everything: structs, sprites, raster, scenes, globals |
+---
 
 ## Project Structure
 
 ```
-Cork.slnx                    .NET solution
+Cork.slnx                       .NET solution
 src/
-  Cork.Compiler/              CLI entry point
-  Cork.Language/              Lexer, Parser, AST
-  Cork.CodeGen/               6510 code generation
-  Cork.Output/                .prg file writer
-  Cork.Runtime/               Runtime library (embedded)
+  Cork.Compiler/                 CLI entry point
+  Cork.Language/                 Lexer, Parser, AST
+  Cork.CodeGen/                  6510 code generation
+  Cork.Output/                   .prg file writer
+  Cork.Runtime/                  Runtime library (embedded in output)
 tests/
-  Cork.Language.Tests/        Lexer and parser tests
-  Cork.CodeGen.Tests/         Code generation tests
-  Cork.Integration.Tests/     Snapshot tests for all samples
-samples/                      26 example programs
+  Cork.Language.Tests/           Lexer and parser tests
+  Cork.CodeGen.Tests/            Code generation tests
+  Cork.Integration.Tests/        Snapshot tests for all samples
+samples/                         33 example programs
+stdlib/                          Standard library modules
 design/
-  language-design.md          Language specification
-  grammar.ebnf                Formal EBNF grammar
-  compiler-plan.md            Compiler architecture plan
-research/                     22 C64 reference documents
+  language-design.md             Language specification
+  grammar.ebnf                   Formal EBNF grammar
+  compiler-plan.md               Compiler architecture
 ```
+
+---
 
 ## Status
 
-Cork is in active development. The compiler handles a substantial subset of the language: structs, scenes, raster interrupts, sprites, fixed-point math, enums, switch, for loops, and more. See the language design doc for the full feature list and what's planned next.
+Cork is in active development. The compiler handles structs, scenes, raster interrupts, sprites (hi-res and multicolor), fixed-point math, enums, switch, for/for-each loops, strings, arrays, keyboard input, bitmap graphics, dead code elimination, constant folding, and a peephole optimizer. See [`design/language-design.md`](design/language-design.md) for the full specification.
 
 ## License
 
-TBD
+[MIT](LICENSE)
