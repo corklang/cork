@@ -8,5 +8,8 @@ public readonly record struct SourceLocation(
     int Length
 )
 {
-    public override string ToString() => $"{FilePath}({Line},{Column})";
+    public override string ToString() =>
+        Length > 1
+            ? $"{FilePath}({Line},{Column}-{Column + Length - 1})"
+            : $"{FilePath}({Line},{Column})";
 }

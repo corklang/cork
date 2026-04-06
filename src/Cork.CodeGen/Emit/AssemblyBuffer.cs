@@ -141,6 +141,7 @@ public sealed class AssemblyBuffer(ushort baseAddress)
     public void EmitCmpImmediate(byte value) { EmitByte(0xC9); EmitByte(value); ResetPeephole(); }
     public void EmitCmpZeroPage(byte addr) { EmitByte(0xC5); EmitByte(addr); ResetPeephole(); }
     public void EmitCpxImmediate(byte value) { EmitByte(0xE0); EmitByte(value); ResetPeephole(); }
+    public void EmitCpyImmediate(byte value) { EmitByte(0xC0); EmitByte(value); ResetPeephole(); }
 
     // Branch — all reset peephole (control flow change)
     public void EmitBne(sbyte offset) { EmitByte(0xD0); EmitByte((byte)offset); ResetPeephole(); }

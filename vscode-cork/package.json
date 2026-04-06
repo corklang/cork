@@ -98,11 +98,12 @@
         "owner": "cork",
         "fileLocation": ["relative", "${workspaceFolder}"],
         "pattern": {
-          "regexp": "^(?:Error|Warning):\\s*(.+)\\((\\d+),(\\d+)\\):\\s*(.+)$",
+          "regexp": "^(?:Error|Warning):\\s*(.+)\\((\\d+),(\\d+)(?:-(\\d+))?\\):\\s*(.+)$",
           "file": 1,
           "line": 2,
           "column": 3,
-          "message": 4
+          "endColumn": 4,
+          "message": 5
         }
       }
     ],

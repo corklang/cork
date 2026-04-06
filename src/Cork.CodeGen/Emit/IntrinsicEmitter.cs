@@ -42,6 +42,14 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             return;
         }
 
+        // Built-in intrinsic: printAt: screenPos char: screenCode
+        if (msgSend.Receiver == null && msgSend.Segments.Count == 2 &&
+            msgSend.Segments[0].Name == "printAt" && msgSend.Segments[1].Name == "char")
+        {
+            EmitPrintAtChar(msgSend.Segments[0].Argument!, msgSend.Segments[1].Argument!);
+            return;
+        }
+
         // Built-in intrinsic: peek: addr — read byte from memory address
         if (msgSend.Receiver == null && msgSend.Segments.Count == 1 &&
             msgSend.Segments[0].Name == "peek")
@@ -394,18 +402,44 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             {
                 // String variable: loop over ZP bytes
                 long strPos = 0;
-                if (posExpr is IntLiteralExpr pl) strPos = pl.Value;
-                else if (ctx.Expressions.TryFoldConstant(posExpr, out var fp)) strPos = fp;
+                var strPosIsConstant = false;
+                if (posExpr is IntLiteralExpr pl) { strPos = pl.Value; strPosIsConstant = true; }
+                else if (ctx.Expressions.TryFoldConstant(posExpr, out var fp)) { strPos = fp; strPosIsConstant = true; }
 
-                var sa = (ushort)(0x0400 + strPos);
-                ctx.Buffer.EmitLdxImmediate(0);
-                // LDA zp,X = $B5 zp (2 bytes)
-                ctx.Buffer.EmitByte(0xB5); ctx.Buffer.EmitByte(strInfo.ZpBase);
-                ctx.Buffer.EmitStaAbsoluteX(sa);
-                ctx.Buffer.EmitInx();
-                ctx.Buffer.EmitCpxImmediate((byte)strInfo.Length);
-                // Loop: LDA zp,X(2) + STA abs,X(3) + INX(1) + CPX(2) + BNE(2) = 10
-                ctx.Buffer.EmitBne(unchecked((sbyte)(-10)));
+                if (strPosIsConstant)
+                {
+                    var sa = (ushort)(0x0400 + strPos);
+                    ctx.Buffer.EmitLdxImmediate(0);
+                    // LDA zp,X = $B5 zp (2 bytes)
+                    ctx.Buffer.EmitByte(0xB5); ctx.Buffer.EmitByte(strInfo.ZpBase);
+                    ctx.Buffer.EmitStaAbsoluteX(sa);
+                    ctx.Buffer.EmitInx();
+                    ctx.Buffer.EmitCpxImmediate((byte)strInfo.Length);
+                    // Loop: LDA zp,X(2) + STA abs,X(3) + INX(1) + CPX(2) + BNE(2) = 10
+                    ctx.Buffer.EmitBne(unchecked((sbyte)(-10)));
+                }
+                else
+                {
+                    // Runtime position: compute $0400 + posExpr → $FB/$FC
+                    ctx.Expressions.EmitExprToA(posExpr);
+                    ctx.Buffer.EmitClc();
+                    ctx.Buffer.EmitAdcImmediate(0x00);
+                    ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
+                    ctx.Buffer.EmitLdaImmediate(0x04);
+                    ctx.Buffer.EmitAdcImmediate(0x00);
+                    ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
+                    // Loop: LDX=index into ZP string, Y=index into screen via ($FB),Y
+                    ctx.Buffer.EmitLdxImmediate(0);
+                    ctx.Buffer.EmitLdyImmediate(0);
+                    // LDA zp,X = $B5 zp (2 bytes)
+                    ctx.Buffer.EmitByte(0xB5); ctx.Buffer.EmitByte(strInfo.ZpBase);
+                    ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
+                    ctx.Buffer.EmitInx();
+                    ctx.Buffer.EmitIny();
+                    ctx.Buffer.EmitCpxImmediate((byte)strInfo.Length);
+                    // Loop: LDA zp,X(2) + STA ($FB),Y(2) + INX(1) + INY(1) + CPX(2) + BNE(2) = 10
+                    ctx.Buffer.EmitBne(unchecked((sbyte)(-10)));
+                }
                 return;
             }
             // Const array
@@ -416,30 +450,106 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             }
             else
             {
-                throw new InvalidOperationException($"Unknown string or array: {textIdent.Name}");
+                throw new CompileError(
+                    $"printAt text: '{textIdent.Name}' is not a string variable or const array. " +
+                    "Use a string literal, string variable, or const byte array. " +
+                    "To write a single screen code, use printAt: char: instead.",
+                    textExpr.Location);
             }
         }
         else
         {
-            throw new InvalidOperationException("printAt text must be a string literal, variable, or const array");
+            throw new CompileError(
+                "printAt text: expects a string literal, string variable, or const array. " +
+                "To write a single screen code, use printAt: char: instead.",
+                textExpr.Location);
         }
 
         // Calculate screen address: $0400 + pos
         long pos = 0;
+        var posIsConstant = false;
         if (posExpr is IntLiteralExpr posLit)
+        {
             pos = posLit.Value;
+            posIsConstant = true;
+        }
         else if (ctx.Expressions.TryFoldConstant(posExpr, out var foldedPos))
+        {
             pos = foldedPos;
+            posIsConstant = true;
+        }
 
-        var screenAddr = (ushort)(0x0400 + pos);
+        if (posIsConstant)
+        {
+            var screenAddr = (ushort)(0x0400 + pos);
+            // LDX #0; loop: LDA data,X; STA screen,X; INX; CPX #len; BNE loop
+            ctx.Buffer.EmitLdxImmediate(0);
+            ctx.Buffer.EmitLdaAbsoluteX(dataAddr);
+            ctx.Buffer.EmitStaAbsoluteX(screenAddr);
+            ctx.Buffer.EmitInx();
+            ctx.Buffer.EmitCpxImmediate((byte)arraySize);
+            ctx.Buffer.EmitBne(unchecked((sbyte)(-11)));
+        }
+        else
+        {
+            // Runtime position: compute $0400 + posExpr → $FB/$FC
+            ctx.Expressions.EmitExprToA(posExpr);
+            ctx.Buffer.EmitClc();
+            ctx.Buffer.EmitAdcImmediate(0x00);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
+            ctx.Buffer.EmitLdaImmediate(0x04);
+            ctx.Buffer.EmitAdcImmediate(0x00);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
+            // Loop: LDY as index into both data and screen
+            ctx.Buffer.EmitLdyImmediate(0);
+            ctx.Buffer.EmitLdaAbsoluteY(dataAddr);
+            ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
+            ctx.Buffer.EmitIny();
+            ctx.Buffer.EmitCpyImmediate((byte)arraySize);
+            // Loop: LDA abs,Y(3) + STA ($FB),Y(2) + INY(1) + CPY(2) + BNE(2) = 10
+            ctx.Buffer.EmitBne(unchecked((sbyte)(-10)));
+        }
+    }
 
-        // LDX #0; loop: LDA data,X; STA screen,X; INX; CPX #len; BNE loop
-        ctx.Buffer.EmitLdxImmediate(0);
-        ctx.Buffer.EmitLdaAbsoluteX(dataAddr);
-        ctx.Buffer.EmitStaAbsoluteX(screenAddr);
-        ctx.Buffer.EmitInx();
-        ctx.Buffer.EmitCpxImmediate((byte)arraySize);
-        ctx.Buffer.EmitBne(unchecked((sbyte)(-11)));
+    /// <summary>
+    /// printAt: screenPos char: screenCode
+    /// Writes a single screen code byte to $0400 + screenPos.
+    /// </summary>
+    private void EmitPrintAtChar(ExprNode posExpr, ExprNode charExpr)
+    {
+        long pos = 0;
+        var posIsConstant = false;
+        if (posExpr is IntLiteralExpr posLit)
+        {
+            pos = posLit.Value;
+            posIsConstant = true;
+        }
+        else if (ctx.Expressions.TryFoldConstant(posExpr, out var foldedPos))
+        {
+            pos = foldedPos;
+            posIsConstant = true;
+        }
+
+        if (posIsConstant)
+        {
+            var screenAddr = (ushort)(0x0400 + pos);
+            ctx.Expressions.EmitExprToA(charExpr);
+            ctx.Buffer.EmitStaAbsolute(screenAddr);
+        }
+        else
+        {
+            // Runtime position: compute $0400 + posExpr → $FB/$FC
+            ctx.Expressions.EmitExprToA(posExpr);
+            ctx.Buffer.EmitClc();
+            ctx.Buffer.EmitAdcImmediate(0x00);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
+            ctx.Buffer.EmitLdaImmediate(0x04);
+            ctx.Buffer.EmitAdcImmediate(0x00);
+            ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerHi);
+            ctx.Expressions.EmitExprToA(charExpr);
+            ctx.Buffer.EmitLdyImmediate(0);
+            ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
+        }
     }
 
     public void EmitPokeScreen(ExprNode offsetExpr, ExprNode valueExpr)

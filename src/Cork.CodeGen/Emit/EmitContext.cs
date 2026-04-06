@@ -48,6 +48,9 @@ public sealed class EmitContext
         DataAddresses = dataAddresses;
     }
 
+    // Collected errors for multi-error reporting
+    public List<CompileError> Errors { get; } = [];
+
     // For-each over const byte array: (varName, dataAddr, indexZp)
     public (string Name, ushort DataAddr, byte IndexZp)? ForEachVar { get; set; }
     // For-each over struct array

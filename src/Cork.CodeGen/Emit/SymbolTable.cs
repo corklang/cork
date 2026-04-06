@@ -25,6 +25,8 @@ public sealed class SymbolTable
     private readonly Dictionary<string, Dictionary<string, byte>> _methodParamZp = [];
     // String variables: name → (zpBase, length)
     private readonly Dictionary<string, (byte ZpBase, int Length)> _stringVars = [];
+    // Global string variables survive scene resets
+    private readonly Dictionary<string, (byte ZpBase, int Length)> _globalStringVars = [];
     // Reference parameters (string/array): name → (ptrZpLo, ptrZpHi, lenZp)
     private readonly Dictionary<string, (byte PtrLo, byte PtrHi, byte LenZp)> _refParams = [];
     // Sprite auto-sync: zpAddr → VIC-II register address
@@ -164,9 +166,11 @@ public sealed class SymbolTable
         return _refParams.TryGetValue(name, out info);
     }
 
-    public void RegisterStringVar(string name, byte zpBase, int length)
+    public void RegisterStringVar(string name, byte zpBase, int length, bool isGlobal = false)
     {
         _stringVars[name] = (zpBase, length);
+        if (isGlobal)
+            _globalStringVars[name] = (zpBase, length);
     }
 
     public bool TryGetStringVar(string name, out (byte ZpBase, int Length) info)
@@ -182,6 +186,9 @@ public sealed class SymbolTable
         _spriteSyncRegs.Clear();
         // Note: _refParams NOT cleared — global method ref params persist
         _emittedStructMethods.Clear();
+        // Restore global string vars so they're visible in every scene
+        foreach (var (name, info) in _globalStringVars)
+            _stringVars[name] = info;
     }
 
     private void ResetCoreState()

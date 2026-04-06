@@ -1,5 +1,6 @@
 using Cork.Language.Lexing;
 using Cork.Language.Parsing;
+using Cork.CodeGen;
 using Cork.CodeGen.Emit;
 using Cork.Output.Prg;
 
@@ -57,6 +58,13 @@ try
         Console.WriteLine($"  Peephole: {peepholeRemovals} bytes removed");
 
     return 0;
+}
+catch (AggregateCompileError ex)
+{
+    foreach (var error in ex.Errors)
+        Console.Error.WriteLine($"Error: {error.Message}");
+    Console.Error.WriteLine($"\n{ex.Errors.Count} error(s)");
+    return 1;
 }
 catch (Exception ex)
 {

@@ -48,6 +48,61 @@ const byte KEY_F5 = 135;
 const byte KEY_F7 = 136;
 const byte KEY_RUN_STOP = 3;
 
+// Letter keys (PETSCII)
+const byte KEY_A = 65;
+const byte KEY_B = 66;
+const byte KEY_C = 67;
+const byte KEY_D = 68;
+const byte KEY_E = 69;
+const byte KEY_F = 70;
+const byte KEY_G = 71;
+const byte KEY_H = 72;
+const byte KEY_I = 73;
+const byte KEY_J = 74;
+const byte KEY_K = 75;
+const byte KEY_L = 76;
+const byte KEY_M = 77;
+const byte KEY_N = 78;
+const byte KEY_O = 79;
+const byte KEY_P = 80;
+const byte KEY_Q = 81;
+const byte KEY_R = 82;
+const byte KEY_S = 83;
+const byte KEY_T = 84;
+const byte KEY_U = 85;
+const byte KEY_V = 86;
+const byte KEY_W = 87;
+const byte KEY_X = 88;
+const byte KEY_Y = 89;
+const byte KEY_Z = 90;
+
+// Digit keys (PETSCII)
+const byte KEY_0 = 48;
+const byte KEY_1 = 49;
+const byte KEY_2 = 50;
+const byte KEY_3 = 51;
+const byte KEY_4 = 52;
+const byte KEY_5 = 53;
+const byte KEY_6 = 54;
+const byte KEY_7 = 55;
+const byte KEY_8 = 56;
+const byte KEY_9 = 57;
+
+// Punctuation/symbol keys (PETSCII)
+const byte KEY_PLUS = 43;
+const byte KEY_MINUS = 45;
+const byte KEY_STAR = 42;
+const byte KEY_SLASH = 47;
+const byte KEY_EQUALS = 61;
+const byte KEY_PERIOD = 46;
+const byte KEY_COMMA = 44;
+const byte KEY_COLON = 58;
+const byte KEY_SEMICOLON = 59;
+const byte KEY_AT = 64;
+const byte KEY_POUND = 92;
+const byte KEY_UP_ARROW = 94;
+const byte KEY_LEFT_ARROW = 95;
+
 // Scan the keyboard matrix and return the PETSCII code of the
 // first pressed key, or 0 if no key is pressed.
 // Scans CIA1 directly — works regardless of SEI/CLI state.

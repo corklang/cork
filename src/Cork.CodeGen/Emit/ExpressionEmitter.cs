@@ -409,6 +409,7 @@ public sealed class ExpressionEmitter(EmitContext ctx)
     {
         IntLiteralExpr intLit => (byte)intLit.Value,
         MemberAccessExpr member => ResolveMemberConstant(member),
+        _ when TryFoldConstant(expr, out var folded) => (byte)folded,
         _ => throw new InvalidOperationException($"Cannot evaluate constant: {expr.GetType().Name}")
     };
 

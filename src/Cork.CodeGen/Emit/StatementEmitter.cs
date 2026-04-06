@@ -10,6 +10,18 @@ public sealed class StatementEmitter(EmitContext ctx)
 {
     public void EmitStatement(StmtNode stmt)
     {
+        try
+        {
+            EmitStatementCore(stmt);
+        }
+        catch (CompileError e)
+        {
+            ctx.Errors.Add(e);
+        }
+    }
+
+    private void EmitStatementCore(StmtNode stmt)
+    {
         switch (stmt)
         {
             case VarDeclStmt varDecl: EmitVarDecl(varDecl); break;

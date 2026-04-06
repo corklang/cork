@@ -85,6 +85,9 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         }
         EmitCode(ctx, program, scenes, globalVars, entryScene, reachable.Methods, usesRandom);
 
+        if (ctx.Errors.Count > 0)
+            throw new AggregateCompileError(ctx.Errors);
+
         // Finalize inline data (string literals)
         var codeSize = ctx.Buffer.Length;
         var inlineDataStart = (ushort)(codeBase + codeSize + constDataSize);
@@ -133,8 +136,10 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
             if (gv.ArraySize > 0)
             {
-                ctx.Symbols.AllocGlobalArray(gv.Name, gv.ArraySize);
+                var zpBase = ctx.Symbols.AllocGlobalArray(gv.Name, gv.ArraySize);
                 ctx.RegisterConstArraySize(gv.Name, gv.ArraySize);
+                if (gv.TypeName == "string")
+                    ctx.Symbols.RegisterStringVar(gv.Name, zpBase, gv.ArraySize, isGlobal: true);
             }
             else
                 ctx.Symbols.AllocGlobal(gv.Name);
@@ -144,8 +149,13 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
                 (reachableMethods == null || reachableMethods.Contains(gm.SelectorName)))
                 RegisterGlobalMethod(ctx, gm);
         foreach (var gv in globalVars)
-            if (gv.IsConst && gv.Initializer is IntLiteralExpr constInit)
+        {
+            if (!gv.IsConst || gv.ArraySize > 0 || gv.Initializer == null) continue;
+            if (gv.Initializer is IntLiteralExpr constInit)
                 ctx.Symbols.AddConstantNoShadowCheck(gv.Name, constInit.Value);
+            else if (ctx.Expressions.TryFoldConstant(gv.Initializer, out var folded))
+                ctx.Symbols.AddConstantNoShadowCheck(gv.Name, folded);
+        }
 
         // Register placeholder pointer constants for inline sprites (value 0 — code size unaffected)
         foreach (var (dataName, _, _, _) in inlineSprites)
@@ -221,7 +231,21 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
         var zp = ctx.Symbols.GetLocal(gv.Name);
 
-        // Zero-fill global arrays
+        // Global string arrays: initialize with string content or space-fill
+        if (gv.ArraySize > 0 && gv.TypeName == "string")
+        {
+            var strValue = gv.Initializer is StringLiteralExpr strLit ? strLit.Value : "";
+            var screenCodes = ScreenCodes.FromString(strValue);
+            for (var i = 0; i < gv.ArraySize; i++)
+            {
+                var val = i < screenCodes.Length ? screenCodes[i] : (byte)32;
+                ctx.Buffer.EmitLdaImmediate(val);
+                ctx.Buffer.EmitStaZeroPage((byte)(zp + i));
+            }
+            return;
+        }
+
+        // Zero-fill other global arrays
         if (gv.ArraySize > 0)
         {
             ctx.Buffer.EmitLdaImmediate(0);
@@ -371,6 +395,11 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
                 case WhileStmt w: CollectStringsFromBlock(w.Body, found); break;
                 case ForStmt f: CollectStringsFromBlock(f.Body, found); break;
                 case ForEachStmt fe: CollectStringsFromBlock(fe.Body, found); break;
+                case SwitchStmt sw:
+                    foreach (var c in sw.Cases)
+                        CollectStringsFromBlock(new BlockNode(c.Body, c.Body[0].Location), found);
+                    if (sw.DefaultBody != null) CollectStringsFromBlock(sw.DefaultBody, found);
+                    break;
             }
         }
     }

@@ -178,7 +178,8 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
     public void EmitSwitch(SwitchStmt stmt)
     {
         var isExpressionSwitch = stmt.Cases.Any(c =>
-            c.Value is not IntLiteralExpr and not MemberAccessExpr);
+            c.Value is not IntLiteralExpr and not MemberAccessExpr
+            && !ctx.Expressions.TryFoldConstant(c.Value, out _));
 
         if (isExpressionSwitch)
             EmitExpressionSwitch(stmt);

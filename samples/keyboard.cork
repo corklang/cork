@@ -10,7 +10,7 @@ const byte CHAR_SPACE = 32;
 const byte CHAR_BANG = 33;
 
 // Global mutable array — persists across scene transitions
-byte[16] nameBuffer;
+string[16] nameBuffer;
 byte nameLen = 0;
 
 entry scene Demo {
@@ -43,9 +43,9 @@ entry scene Demo {
         // Erase old cursor
         poke: cursorScreen value: CHAR_SPACE;
 
-        if (keyboard.w) { if (posY > 1)  { posY -= 1; } }
+        if (keyboard.w) { if (posY > 1) { posY -= 1; } }
         if (keyboard.s) { if (posY <= 23) { posY += 1; } }
-        if (keyboard.a) { if (posX > 0)  { posX -= 1; } }
+        if (keyboard.a) { if (posX > 0) { posX -= 1; } }
         if (keyboard.d) { if (posX < 39) { posX += 1; } }
 
         if (keyboard.space) {
@@ -53,7 +53,7 @@ entry scene Demo {
             if (color > 15) { color = 1; }
         }
 
-        if (keyboard.q) { go NameEntry; }
+        if ((getKeyOnce:) == KEY_Q) { go NameEntry; }
 
         // Recompute cursor position
         computeCursor:;
@@ -84,25 +84,23 @@ scene NameEntry {
 
         byte key = (getKeyOnce:);
         if (key != 0) {
-            if (key == KEY_DEL) {
-                if (nameLen > 0) {
-                    poke: 0x0428 + nameLen value: CHAR_SPACE;
-                    nameLen -= 1;
-                    poke: 0x0428 + nameLen value: CHAR_CURSOR;
-                }
-            } else {
-                if (key == KEY_RETURN) {
-                    poke: 0x0428 + nameLen value: CHAR_SPACE;
+            switch (key) {
+                case KEY_DEL:
+                    if (nameLen > 0) {
+                        printAt: nameLen + 40 char: CHAR_SPACE;
+                        nameLen -= 1;
+                        printAt: nameLen + 40 char: CHAR_CURSOR;
+                    }
+                case KEY_RETURN:
                     go Greeting;
-                } else {
+                default:
                     if (nameLen < 16) {
                         byte sc = (toScreenCode: key);
                         nameBuffer[nameLen] = sc;
-                        poke: 0x0428 + nameLen value: sc;
+                        printAt: nameLen + 40 char: sc;
                         nameLen += 1;
-                        poke: 0x0428 + nameLen value: CHAR_CURSOR;
+                        printAt: nameLen + 40 char: CHAR_CURSOR;
                     }
-                }
             }
         }
     }
@@ -117,12 +115,8 @@ scene Greeting {
     enter {
         clearScreen:;
         printAt: 0 text: "HELLO, ";
-        byte i = 0;
-        while (i < nameLen) {
-            poke: 0x0407 + i value: nameBuffer[i];
-            i += 1;
-        }
-        poke: 0x0407 + nameLen value: CHAR_BANG;
+        printAt: 7 text: nameBuffer;
+        printAt: 7 + nameLen text: "!";
         printAt: 80 text: "PRESS ANY KEY";
     }
 

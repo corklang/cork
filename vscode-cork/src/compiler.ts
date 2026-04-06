@@ -3,8 +3,9 @@ import { execFile } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 
-const DIAG_RE = /^(?:Error|Warning):\s*(.+)\((\d+),(\d+)\):\s*(.+)$/;
+const DIAG_RE = /^(?:Error|Warning):\s*(.+)\((\d+),(\d+)(?:-(\d+))?\):\s*(.+)$/;
 const PLAIN_ERROR_RE = /^Error:\s*(.+)$/;
+const CONTINUATION_RE = /^\s{2,}\S/;
 const RAM_RE = /RAM:\s*(\d+)\/(\d+)\s*bytes\s*used\s*\((\d+)%\)/;
 const PEEPHOLE_RE = /Peephole:\s*(\d+)\s*bytes\s*removed/;
 
@@ -124,20 +125,28 @@ export class CorkCompiler {
   ): vscode.Diagnostic[] {
     const diags: vscode.Diagnostic[] = [];
 
-    for (const line of stderr.split("\n")) {
-      const trimmed = line.trim();
+    const stderrLines = stderr.split("\n");
+    for (let i = 0; i < stderrLines.length; i++) {
+      const trimmed = stderrLines[i].trim();
       if (!trimmed) continue;
 
       const match = DIAG_RE.exec(trimmed);
       if (match) {
         const lineNum = Math.max(0, parseInt(match[2], 10) - 1);
         const col = Math.max(0, parseInt(match[3], 10) - 1);
-        const message = match[4];
+        const endCol = match[4] ? parseInt(match[4], 10) : col + 1;
+        let message = match[5];
         const severity = trimmed.startsWith("Warning")
           ? vscode.DiagnosticSeverity.Warning
           : vscode.DiagnosticSeverity.Error;
 
-        const range = new vscode.Range(lineNum, col, lineNum, col + 1);
+        // Collect continuation lines (indented)
+        while (i + 1 < stderrLines.length && CONTINUATION_RE.test(stderrLines[i + 1])) {
+          i++;
+          message += " " + stderrLines[i].trim();
+        }
+
+        const range = new vscode.Range(lineNum, col, lineNum, endCol);
         const diag = new vscode.Diagnostic(range, message, severity);
         diag.source = "cork";
         diags.push(diag);
