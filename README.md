@@ -253,7 +253,12 @@ poke: 0xD001 value: ballY;  // integer part -> sprite Y
 
 ## Standard Library
 
-Modular Cork files you can import:
+```
+import "stdlib/screen.cork";
+import "stdlib/math.cork";
+```
+
+Installed automatically with `brew install corklang/tap/corklang`. Modules available:
 
 | Module | What it provides |
 |:--|:--|
