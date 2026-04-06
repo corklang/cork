@@ -18,7 +18,8 @@ public sealed class SceneEmitter(EmitContext ctx)
         _currentSceneName = scene.Name;
 
         ctx.Buffer.DefineLabel($"_scene_{scene.Name}");
-        ctx.Debug?.OpenScope(ctx.Debug.Scenes, scene.Name, ctx.Buffer.CurrentAddress);
+        var sceneStartMarker = ctx.Buffer.EmitDebugMarker();
+        ctx.Debug?.OpenScope(ctx.Debug.Scenes, scene.Name, sceneStartMarker);
 
         var sceneVarNames = new HashSet<string>();
         foreach (var member in scene.Members)
@@ -114,7 +115,8 @@ public sealed class SceneEmitter(EmitContext ctx)
         if (rasterBlocks.Count > 0)
             EmitRasterHandler(rasterBlocks, scene.Name);
 
-        ctx.Debug?.CloseScope(ctx.Debug.Scenes, scene.Name, ctx.Buffer.CurrentAddress);
+        var sceneEndMarker = ctx.Buffer.EmitDebugMarker();
+        ctx.Debug?.CloseScope(ctx.Debug.Scenes, scene.Name, sceneEndMarker);
     }
 
     public void EmitHardwareBlock(HardwareBlockNode hw)
@@ -440,10 +442,12 @@ public sealed class SceneEmitter(EmitContext ctx)
     {
         var label = $"_method_{method.SelectorName}";
         ctx.Buffer.DefineLabel(label);
-        ctx.Debug?.OpenScope(ctx.Debug.Methods, method.SelectorName, ctx.Buffer.CurrentAddress);
+        var methodStartMarker = ctx.Buffer.EmitDebugMarker();
+        ctx.Debug?.OpenScope(ctx.Debug.Methods, method.SelectorName, methodStartMarker);
         ctx.Statements.EmitBlock(method.Body);
         ctx.Buffer.EmitRts();
-        ctx.Debug?.CloseScope(ctx.Debug.Methods, method.SelectorName, ctx.Buffer.CurrentAddress);
+        var methodEndMarker = ctx.Buffer.EmitDebugMarker();
+        ctx.Debug?.CloseScope(ctx.Debug.Methods, method.SelectorName, methodEndMarker);
     }
 
     public void EmitVsyncWait()

@@ -108,6 +108,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         var inlineDataStart = (ushort)(codeBase + codeSize + constDataSize);
         var inlineData = ctx.FinalizeInlineData(inlineDataStart);
         ctx.Buffer.ResolveFixups();
+        ctx.Debug?.ResolveAddresses(ctx.Buffer);
 
         // Extract variable debug info from symbol table
         if (ctx.Debug != null)
@@ -314,7 +315,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
     {
         var label = $"_method_{gm.SelectorName}";
         ctx.Buffer.DefineLabel(label);
-        ctx.Debug?.OpenScope(ctx.Debug.Methods, gm.SelectorName, ctx.Buffer.CurrentAddress);
+        var gmStartMarker = ctx.Buffer.EmitDebugMarker();
+        ctx.Debug?.OpenScope(ctx.Debug.Methods, gm.SelectorName, gmStartMarker);
         // Each method gets its own non-overlapping local zone so nested calls work.
         ctx.Symbols.PrepareMethodLocals();
         ctx.Symbols.InstallMethodParamLocals(gm.SelectorName, gm.Parameters);
@@ -322,7 +324,8 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         ctx.Symbols.RemoveMethodParamLocals(gm.Parameters);
         ctx.Symbols.FinalizeMethodLocals();
         ctx.Buffer.EmitRts();
-        ctx.Debug?.CloseScope(ctx.Debug.Methods, gm.SelectorName, ctx.Buffer.CurrentAddress);
+        var gmEndMarker = ctx.Buffer.EmitDebugMarker();
+        ctx.Debug?.CloseScope(ctx.Debug.Methods, gm.SelectorName, gmEndMarker);
     }
 
     /// <summary>

@@ -14,9 +14,13 @@ public sealed class DebugInfo
     public List<ScopeInfo> Scenes { get; } = [];
     public List<ScopeInfo> Methods { get; } = [];
 
-    public void AddStatement(string file, int line, int column, ushort address)
+    // Deferred address records — marker IDs resolved after ResolveFixups
+    private readonly List<(string File, int Line, int Column, int MarkerId)> _deferredStatements = [];
+    private readonly List<(List<ScopeInfo> List, string Name, int MarkerId, bool IsClose)> _deferredScopes = [];
+
+    public void AddStatement(string file, int line, int column, int markerId)
     {
-        Statements.Add(new StatementMap(file, line, column, address));
+        _deferredStatements.Add((file, line, column, markerId));
     }
 
     public void AddVariable(string name, string type, byte zpAddress, int size, string scope)
@@ -24,19 +28,42 @@ public sealed class DebugInfo
         Variables.Add(new VariableInfo(name, type, zpAddress, size, scope));
     }
 
-    public void OpenScope(List<ScopeInfo> list, string name, ushort startAddress)
+    public void OpenScope(List<ScopeInfo> list, string name, int markerId)
     {
-        list.Add(new ScopeInfo(name, startAddress, startAddress));
+        _deferredScopes.Add((list, name, markerId, false));
     }
 
-    public void CloseScope(List<ScopeInfo> list, string name, ushort endAddress)
+    public void CloseScope(List<ScopeInfo> list, string name, int markerId)
     {
-        for (var i = list.Count - 1; i >= 0; i--)
+        _deferredScopes.Add((list, name, markerId, true));
+    }
+
+    /// <summary>
+    /// Resolve all deferred marker IDs to final byte addresses.
+    /// Must be called after InstructionBuffer.ResolveFixups().
+    /// </summary>
+    public void ResolveAddresses(InstructionBuffer buffer)
+    {
+        foreach (var (file, line, column, markerId) in _deferredStatements)
+            Statements.Add(new StatementMap(file, line, column, buffer.ResolveMarkerAddress(markerId)));
+
+        foreach (var (list, name, markerId, isClose) in _deferredScopes)
         {
-            if (list[i].Name == name)
+            var addr = buffer.ResolveMarkerAddress(markerId);
+            if (isClose)
             {
-                list[i] = list[i] with { EndAddress = endAddress };
-                return;
+                for (var i = list.Count - 1; i >= 0; i--)
+                {
+                    if (list[i].Name == name)
+                    {
+                        list[i] = list[i] with { EndAddress = addr };
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                list.Add(new ScopeInfo(name, addr, addr));
             }
         }
     }

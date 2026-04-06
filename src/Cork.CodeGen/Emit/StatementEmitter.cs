@@ -22,9 +22,10 @@ public sealed class StatementEmitter(EmitContext ctx)
 
     private void EmitStatementCore(StmtNode stmt)
     {
+        var markerId = ctx.Buffer.EmitDebugMarker();
         ctx.Debug?.AddStatement(
             stmt.Location.FilePath, stmt.Location.Line, stmt.Location.Column,
-            ctx.Buffer.CurrentAddress);
+            markerId);
 
         switch (stmt)
         {

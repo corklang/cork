@@ -58,6 +58,11 @@ public enum StreamEntryKind : byte
     /// (or 2+3 byte inverted-branch-over-JMP if out of range) during fixup resolution.
     /// </summary>
     BranchToLabel,
+    /// <summary>
+    /// Zero-size debug marker used to record a byte address for debug info.
+    /// Resolved to a final address after fixup resolution.
+    /// </summary>
+    DebugMarker,
 }
 
 /// <summary>
@@ -83,6 +88,7 @@ public readonly struct StreamEntry
         StreamEntryKind.Label => 0,
         StreamEntryKind.Data => RawData?.Length ?? 0,
         StreamEntryKind.BranchToLabel => 2, // branch opcode + offset (may expand during resolution)
+        StreamEntryKind.DebugMarker => 0,
         _ => 0
     };
 
@@ -101,4 +107,7 @@ public readonly struct StreamEntry
     /// </summary>
     public static StreamEntry Branch(int id, byte opcode, string targetLabel)
         => new() { Id = id, Kind = StreamEntryKind.BranchToLabel, BranchOpcode = opcode, BranchTarget = targetLabel };
+
+    public static StreamEntry Marker(int id)
+        => new() { Id = id, Kind = StreamEntryKind.DebugMarker };
 }

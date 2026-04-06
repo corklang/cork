@@ -252,6 +252,35 @@ public sealed class InstructionBuffer(ushort baseAddress)
     public void EmitSei() => Append(StreamEntry.Instr(NextId(), 0x78, AddressMode.Implied));
     public void EmitCli() => Append(StreamEntry.Instr(NextId(), 0x58, AddressMode.Implied));
 
+    // --- Debug markers ---
+
+    /// <summary>
+    /// Insert a zero-size debug marker at the current position.
+    /// After ResolveFixups(), use ResolveMarkerAddress() to get the final byte address.
+    /// </summary>
+    public int EmitDebugMarker()
+    {
+        var id = NextId();
+        Append(StreamEntry.Marker(id));
+        return id;
+    }
+
+    /// <summary>
+    /// Resolve a debug marker ID to its final byte address.
+    /// Must be called after ResolveFixups().
+    /// </summary>
+    public ushort ResolveMarkerAddress(int markerId)
+    {
+        ushort addr = baseAddress;
+        foreach (var entry in _entries)
+        {
+            if (entry.Kind == StreamEntryKind.DebugMarker && entry.Id == markerId)
+                return addr;
+            addr += (ushort)entry.Size;
+        }
+        throw new InvalidOperationException($"Debug marker {markerId} not found");
+    }
+
     // --- Debug ---
 
     public void DumpInstructions()

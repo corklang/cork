@@ -16,6 +16,7 @@ public static class PeepholeOptimizer
             changed = false;
             for (var i = 0; i < entries.Count - 1; i++)
             {
+                if (entries[i].Kind != StreamEntryKind.Instruction) continue;
                 var removed = TryOptimizeAt(entries, i);
                 if (removed > 0)
                 {
@@ -26,6 +27,28 @@ public static class PeepholeOptimizer
             }
         } while (changed);
         return totalRemoved;
+    }
+
+    /// <summary>
+    /// Find the next instruction entry after index i, skipping labels and debug markers.
+    /// Returns -1 if no instruction found before a data or branch-to-label entry.
+    /// </summary>
+    /// <summary>
+    /// Find the next instruction entry after index, skipping only debug markers.
+    /// Labels, data, and branch-to-label entries are barriers — returns -1.
+    /// </summary>
+    private static int NextInstr(List<StreamEntry> entries, int after)
+    {
+        for (var j = after + 1; j < entries.Count; j++)
+        {
+            switch (entries[j].Kind)
+            {
+                case StreamEntryKind.Instruction: return j;
+                case StreamEntryKind.DebugMarker: continue;
+                default: return -1; // label, data, branch — barrier
+            }
+        }
+        return -1;
     }
 
     private static int TryOptimizeAt(List<StreamEntry> entries, int i)
@@ -41,12 +64,11 @@ public static class PeepholeOptimizer
     /// </summary>
     private static int TryWindow2(List<StreamEntry> entries, int i)
     {
+        var j = NextInstr(entries, i);
+        if (j < 0) return 0;
+
         var a = entries[i];
-        var b = entries[i + 1];
-
-        if (a.Kind != StreamEntryKind.Instruction || b.Kind != StreamEntryKind.Instruction)
-            return 0;
-
+        var b = entries[j];
         var ai = a.Instruction;
         var bi = b.Instruction;
 
@@ -60,35 +82,38 @@ public static class PeepholeOptimizer
         // Rule: STA zp; LDA zp (same addr) → STA zp (remove LDA)
         if (ai.Opcode == 0x85 && bi.Opcode == 0xA5 && ai.Operand == bi.Operand)
         {
-            entries.RemoveAt(i + 1);
+            entries.RemoveAt(j);
             return 2;
         }
 
         // Rule: PHA; PLA → remove both (stack round-trip with nothing between)
         if (ai.Opcode == 0x48 && bi.Opcode == 0x68)
         {
-            entries.RemoveRange(i, 2);
+            entries.RemoveAt(j);
+            entries.RemoveAt(i);
             return 2;
         }
 
         // Rule: TAX; TXA → remove both (transfer round-trip)
         if (ai.Opcode == 0xAA && bi.Opcode == 0x8A)
         {
-            entries.RemoveRange(i, 2);
+            entries.RemoveAt(j);
+            entries.RemoveAt(i);
             return 2;
         }
 
         // Rule: TAY; TYA → remove both (transfer round-trip)
         if (ai.Opcode == 0xA8 && bi.Opcode == 0x98)
         {
-            entries.RemoveRange(i, 2);
+            entries.RemoveAt(j);
+            entries.RemoveAt(i);
             return 2;
         }
 
         // Rule: LDA zp; STA zp (same addr) → LDA zp (remove redundant store-back)
         if (ai.Opcode == 0xA5 && bi.Opcode == 0x85 && ai.Operand == bi.Operand)
         {
-            entries.RemoveAt(i + 1);
+            entries.RemoveAt(j);
             return 2;
         }
 
@@ -102,14 +127,16 @@ public static class PeepholeOptimizer
         // Rule: CLC; ADC #0 → remove both (addition of zero)
         if (ai.Opcode == 0x18 && bi.Opcode == 0x69 && bi.Operand == 0)
         {
-            entries.RemoveRange(i, 2);
+            entries.RemoveAt(j);
+            entries.RemoveAt(i);
             return 3;
         }
 
         // Rule: SEC; SBC #0 → remove both (subtraction of zero)
         if (ai.Opcode == 0x38 && bi.Opcode == 0xE9 && bi.Operand == 0)
         {
-            entries.RemoveRange(i, 2);
+            entries.RemoveAt(j);
+            entries.RemoveAt(i);
             return 3;
         }
 
@@ -121,26 +148,20 @@ public static class PeepholeOptimizer
     /// </summary>
     private static int TryWindow3(List<StreamEntry> entries, int i)
     {
-        if (i + 2 >= entries.Count) return 0;
+        var j = NextInstr(entries, i);
+        if (j < 0) return 0;
+        var k = NextInstr(entries, j);
+        if (k < 0) return 0;
 
-        var a = entries[i];
-        var b = entries[i + 1];
-        var c = entries[i + 2];
-
-        if (a.Kind != StreamEntryKind.Instruction ||
-            b.Kind != StreamEntryKind.Instruction ||
-            c.Kind != StreamEntryKind.Instruction)
-            return 0;
-
-        var ai = a.Instruction;
-        var bi = b.Instruction;
-        var ci = c.Instruction;
+        var ai = entries[i].Instruction;
+        var bi = entries[j].Instruction;
+        var ci = entries[k].Instruction;
 
         // Rule: LDA #X; STA zp; LDA #X (same value) → LDA #X; STA zp (remove redundant re-load)
         if (ai.Opcode == 0xA9 && bi.Opcode == 0x85 && ci.Opcode == 0xA9 &&
             ai.Operand == ci.Operand)
         {
-            entries.RemoveAt(i + 2);
+            entries.RemoveAt(k);
             return 2;
         }
 
@@ -148,8 +169,9 @@ public static class PeepholeOptimizer
         if (ai.Opcode == 0xA9 && ai.Operand == 0 &&
             bi.Opcode == 0x18 && ci.Opcode == 0x65)
         {
-            entries[i] = StreamEntry.Instr(a.Id, 0xA5, AddressMode.ZeroPage, ci.Operand);
-            entries.RemoveRange(i + 1, 2);
+            entries[i] = StreamEntry.Instr(entries[i].Id, 0xA5, AddressMode.ZeroPage, ci.Operand);
+            entries.RemoveAt(k);
+            entries.RemoveAt(j);
             return 3;
         }
 
