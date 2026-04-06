@@ -196,6 +196,20 @@ public sealed class InstructionBuffer(ushort baseAddress)
     public void EmitBpl(sbyte offset)
         => Append(StreamEntry.Instr(NextId(), 0x10, AddressMode.Relative, (ushort)(byte)offset));
 
+    // Label-based branches — resolved during ResolveFixups
+    public void EmitBneToLabel(string label)
+        => Append(StreamEntry.Branch(NextId(), 0xD0, label));
+    public void EmitBeqToLabel(string label)
+        => Append(StreamEntry.Branch(NextId(), 0xF0, label));
+    public void EmitBccToLabel(string label)
+        => Append(StreamEntry.Branch(NextId(), 0x90, label));
+    public void EmitBcsToLabel(string label)
+        => Append(StreamEntry.Branch(NextId(), 0xB0, label));
+    public void EmitBmiToLabel(string label)
+        => Append(StreamEntry.Branch(NextId(), 0x30, label));
+    public void EmitBplToLabel(string label)
+        => Append(StreamEntry.Branch(NextId(), 0x10, label));
+
     // Jump — auto-detect backward label references and convert to fixups
     public void EmitJmpAbsolute(ushort addr)
     {
@@ -306,30 +320,68 @@ public sealed class InstructionBuffer(ushort baseAddress)
 
     public void ResolveFixups()
     {
-        // Build ID → index map
+        // Phase 1: Resolve BranchToLabel entries.
+        // Expand any that don't fit in -128..+127 to inverted-branch + JMP.
+        // Iterate until stable (expansion can push other branches out of range).
+        bool expanded;
+        do
+        {
+            expanded = false;
+            // Build byte offset map
+            var offsets = BuildOffsetMap();
+            // Build label-name-to-index map
+            var labelIndices = BuildLabelIndexMap();
+
+            for (var i = 0; i < _entries.Count; i++)
+            {
+                var entry = _entries[i];
+                if (entry.Kind != StreamEntryKind.BranchToLabel) continue;
+
+                if (!labelIndices.TryGetValue(entry.BranchTarget!, out var labelIdx))
+                    throw new InvalidOperationException($"Unresolved branch label: {entry.BranchTarget}");
+
+                // Offset is from the byte AFTER the branch instruction (PC + 2)
+                var branchEnd = offsets[i] + 2;
+                var targetOffset = offsets[labelIdx];
+                var relOffset = targetOffset - branchEnd;
+
+                if (relOffset is >= -128 and <= 127)
+                {
+                    // Fits: convert to a concrete branch instruction
+                    _entries[i] = StreamEntry.Instr(entry.Id, entry.BranchOpcode, AddressMode.Relative,
+                        (ushort)(byte)(sbyte)relOffset);
+                }
+                else
+                {
+                    // Doesn't fit: expand to inverted-branch(2) + JMP(3)
+                    var invertedOpcode = InvertBranch(entry.BranchOpcode);
+                    // The inverted branch skips 3 bytes (the JMP)
+                    _entries[i] = StreamEntry.Instr(entry.Id, invertedOpcode, AddressMode.Relative, 3);
+                    // Insert a JMP forward to the target label
+                    var jmpId = NextId();
+                    _fixups.Add((jmpId, entry.BranchTarget!, FixupKind.Word));
+                    _entries.Insert(i + 1, StreamEntry.Instr(jmpId, 0x4C, AddressMode.Absolute, 0x0000));
+                    expanded = true;
+                    break; // Restart — indices have shifted
+                }
+            }
+        } while (expanded);
+
+        // Phase 2: Resolve all word/lobyte/hibyte fixups
         var idToIndex = new Dictionary<int, int>();
         for (var i = 0; i < _entries.Count; i++)
             idToIndex[_entries[i].Id] = i;
 
-        // Build entry-index-to-byte-offset map
-        var entryOffsets = new int[_entries.Count];
-        var offset = 0;
-        for (var i = 0; i < _entries.Count; i++)
-        {
-            entryOffsets[i] = offset;
-            offset += _entries[i].Size;
-        }
+        var finalOffsets = BuildOffsetMap();
 
         foreach (var (entryId, label, kind) in _fixups)
         {
-            // Find the label's byte offset
             if (!_labelEntryIds.TryGetValue(label, out var labelId))
                 throw new InvalidOperationException($"Unresolved label: {label}");
             if (!idToIndex.TryGetValue(labelId, out var labelIdx))
                 throw new InvalidOperationException($"Label entry not found: {label}");
-            var labelAddr = (ushort)(baseAddress + entryOffsets[labelIdx]);
+            var labelAddr = (ushort)(baseAddress + finalOffsets[labelIdx]);
 
-            // Find the fixup instruction
             if (!idToIndex.TryGetValue(entryId, out var instrIdx))
                 throw new InvalidOperationException($"Fixup entry not found for label: {label}");
             var entry = _entries[instrIdx];
@@ -347,7 +399,46 @@ public sealed class InstructionBuffer(ushort baseAddress)
 
             _entries[instrIdx] = StreamEntry.Instr(entry.Id, instr.Opcode, instr.Mode, newOperand);
         }
+
+        // Recalculate byte length (branch expansions may have changed it)
+        _byteLength = 0;
+        foreach (var entry in _entries)
+            _byteLength += entry.Size;
     }
+
+    private int[] BuildOffsetMap()
+    {
+        var offsets = new int[_entries.Count];
+        var offset = 0;
+        for (var i = 0; i < _entries.Count; i++)
+        {
+            offsets[i] = offset;
+            offset += _entries[i].Size;
+        }
+        return offsets;
+    }
+
+    private Dictionary<string, int> BuildLabelIndexMap()
+    {
+        var map = new Dictionary<string, int>();
+        for (var i = 0; i < _entries.Count; i++)
+        {
+            if (_entries[i].Kind == StreamEntryKind.Label)
+                map[_entries[i].LabelName!] = i;
+        }
+        return map;
+    }
+
+    private static byte InvertBranch(byte opcode) => opcode switch
+    {
+        0xD0 => 0xF0, // BNE → BEQ
+        0xF0 => 0xD0, // BEQ → BNE
+        0x90 => 0xB0, // BCC → BCS
+        0xB0 => 0x90, // BCS → BCC
+        0x30 => 0x10, // BMI → BPL
+        0x10 => 0x30, // BPL → BMI
+        _ => throw new InvalidOperationException($"Cannot invert branch opcode: 0x{opcode:X2}")
+    };
 
     // --- Optimization ---
 

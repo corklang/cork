@@ -16,8 +16,7 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
         ctx.LoopStack.Push((endLabel, loopLabel));
 
         ctx.Buffer.DefineLabel(loopLabel);
-        EmitConditionBranchTrue(whileStmt.Condition, 3);
-        ctx.Buffer.EmitJmpForward(endLabel);
+        EmitConditionBranchFalseToLabel(whileStmt.Condition, endLabel);
         ctx.Statements.EmitBlock(whileStmt.Body);
         ctx.Buffer.EmitJmpAbsolute(ctx.Buffer.GetLabel(loopLabel));
         ctx.Buffer.DefineLabel(endLabel);
@@ -36,8 +35,7 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
         ctx.LoopStack.Push((endLabel, stepLabel));
 
         ctx.Buffer.DefineLabel(loopLabel);
-        EmitConditionBranchTrue(forStmt.Condition, 3);
-        ctx.Buffer.EmitJmpForward(endLabel);
+        EmitConditionBranchFalseToLabel(forStmt.Condition, endLabel);
 
         ctx.Statements.EmitBlock(forStmt.Body);
 
@@ -74,8 +72,7 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             ctx.Buffer.DefineLabel(loopLabel);
             ctx.Buffer.EmitLdaZeroPage(idxZp);
             ctx.Buffer.EmitCmpImmediate((byte)arraySize);
-            ctx.Buffer.EmitBcc(3); // less → skip JMP, enter body
-            ctx.Buffer.EmitJmpForward(endLabel);
+            ctx.Buffer.EmitBcsToLabel(endLabel); // idx >= size → exit
 
             // Register loop variable as an alias for array[idx]
             // The variable name resolves in EmitExprToA via a special "foreach context"
@@ -113,8 +110,7 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             ctx.Buffer.DefineLabel(loopLabel);
             ctx.Buffer.EmitLdaZeroPage(idxZp);
             ctx.Buffer.EmitCmpImmediate((byte)arrInfo.Size);
-            ctx.Buffer.EmitBcc(3);
-            ctx.Buffer.EmitJmpForward(endLabel);
+            ctx.Buffer.EmitBcsToLabel(endLabel); // idx >= size → exit
 
             // Register for-each struct context
             ctx.ForEachStructVar = (forEach.VarName, arrInfo.StructType, arrInfo.FieldBases, idxZp);
@@ -150,8 +146,7 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             ctx.Buffer.DefineLabel(loopLabel);
             ctx.Buffer.EmitLdaZeroPage(idxZp);
             ctx.Buffer.EmitCmpZeroPage(refParam.LenZp);
-            ctx.Buffer.EmitBcc(3);
-            ctx.Buffer.EmitJmpForward(endLabel);
+            ctx.Buffer.EmitBcsToLabel(endLabel); // idx >= len → exit
 
             // Register loop variable — resolves via ref param's pointer
             ctx.ForEachVar = (forEach.VarName, 0, idxZp); // dataAddr unused, we override in expression
@@ -199,8 +194,7 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             var caseValue = ctx.Expressions.EvalConstExpr(stmt.Cases[i].Value);
             ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpTemp);
             ctx.Buffer.EmitCmpImmediate(caseValue);
-            ctx.Buffer.EmitBne(3);
-            ctx.Buffer.EmitJmpForward($"swcase_{endLabel}_{i}");
+            ctx.Buffer.EmitBeqToLabel($"swcase_{endLabel}_{i}");
         }
 
         if (stmt.DefaultBody != null)
@@ -236,8 +230,7 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
                 ? ctx.NextLabel($"swnext_{i}")
                 : (stmt.DefaultBody != null ? ctx.NextLabel("swdef") : endLabel);
 
-            EmitConditionBranchTrue(stmt.Cases[i].Value, 3);
-            ctx.Buffer.EmitJmpForward(nextLabel);
+            EmitConditionBranchFalseToLabel(stmt.Cases[i].Value, nextLabel);
 
             foreach (var s in stmt.Cases[i].Body)
                 ctx.Statements.EmitStatement(s);
@@ -276,15 +269,13 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
 
         if (ifStmt.ElseBody == null && ifStmt.ElseIfs.Count == 0)
         {
-            EmitConditionBranchTrue(ifStmt.Condition, 3);
-            ctx.Buffer.EmitJmpForward(endLabel);
+            EmitConditionBranchFalseToLabel(ifStmt.Condition, endLabel);
             ctx.Statements.EmitBlock(ifStmt.ThenBody);
         }
         else
         {
             var elseLabel = ctx.NextLabel("else");
-            EmitConditionBranchTrue(ifStmt.Condition, 3);
-            ctx.Buffer.EmitJmpForward(elseLabel);
+            EmitConditionBranchFalseToLabel(ifStmt.Condition, elseLabel);
             ctx.Statements.EmitBlock(ifStmt.ThenBody);
             ctx.Buffer.EmitJmpForward(endLabel);
             ctx.Buffer.DefineLabel(elseLabel);
@@ -452,6 +443,184 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
         {
             ctx.Expressions.EmitExprToA(bareIdent);
             ctx.Buffer.EmitBeq((sbyte)skipBytes);
+            return;
+        }
+
+        throw new InvalidOperationException($"Unsupported condition: {condition.GetType().Name}");
+    }
+
+    /// <summary>
+    /// Branch to label when condition is FALSE. Replaces the pattern:
+    ///   EmitConditionBranchTrue(cond, 3); EmitJmpForward(label);
+    /// Uses label-based branches that auto-expand if out of range.
+    /// </summary>
+    public void EmitConditionBranchFalseToLabel(ExprNode condition, string label)
+    {
+        // Sprite-sprite collision
+        if (condition is MessageSendExpr { Segments: [{ Name: "collidedWith" }] } collMsg &&
+            collMsg.Receiver is IdentifierExpr collReceiver &&
+            collMsg.Segments[0].Argument is IdentifierExpr collTarget)
+        {
+            var recvIdx = GetSpriteIndex(collReceiver.Name);
+            var targIdx = GetSpriteIndex(collTarget.Name);
+            var mask = (byte)((1 << recvIdx) | (1 << targIdx));
+            ctx.Buffer.EmitLdaAbsolute(0xD01E);
+            ctx.Buffer.EmitAndImmediate(mask);
+            ctx.Buffer.EmitCmpImmediate(mask);
+            ctx.Buffer.EmitBneToLabel(label); // not equal → no collision → false
+            return;
+        }
+
+        // Sprite-background collision
+        if (condition is MessageSendExpr { Segments: [{ Name: "collidedWithBackground" }] } bgCollMsg &&
+            bgCollMsg.Receiver is IdentifierExpr bgCollReceiver)
+        {
+            var sprIdx = GetSpriteIndex(bgCollReceiver.Name);
+            var mask = (byte)(1 << sprIdx);
+            ctx.Buffer.EmitLdaAbsolute(0xD01F);
+            ctx.Buffer.EmitAndImmediate(mask);
+            ctx.Buffer.EmitBeqToLabel(label); // zero → no collision → false
+            return;
+        }
+
+        // Joystick check
+        if (IsJoystickCheck(condition, out var bitMask, out var ciaAddr))
+        {
+            ctx.Buffer.EmitLdaAbsolute(ciaAddr);
+            ctx.Buffer.EmitAndImmediate(bitMask);
+            ctx.Buffer.EmitBneToLabel(label); // bit set → not pressed → false
+            return;
+        }
+
+        // Keyboard check
+        if (IsKeyboardCheck(condition, out var colSelect, out var rowMask))
+        {
+            ctx.Buffer.EmitLdaImmediate(colSelect);
+            ctx.Buffer.EmitStaAbsolute(0xDC00);
+            ctx.Buffer.EmitLdaAbsolute(0xDC01);
+            ctx.Buffer.EmitAndImmediate(rowMask);
+            ctx.Buffer.EmitBneToLabel(label); // bit set → not pressed → false
+            return;
+        }
+
+        // Word comparisons: fall back to old pattern (hardcoded offsets in word compare routines)
+        if (condition is BinaryExpr wordBin)
+        {
+            string? wordVarName = null;
+            if (wordBin.Left is IdentifierExpr wordIdent && ctx.Symbols.IsWordVar(wordIdent.Name))
+                wordVarName = wordIdent.Name;
+            else if (wordBin.Left is MemberAccessExpr memberLeft &&
+                     memberLeft.Receiver is IdentifierExpr recvIdent &&
+                     ctx.Expressions.TryResolveStructField(memberLeft, out var memberZp) &&
+                     ctx.Symbols.GetVarTypeForZp(memberZp) is { } ft && SymbolTable.Is16BitType(ft))
+                wordVarName = $"{recvIdent.Name}${memberLeft.MemberName}";
+
+            if (wordVarName != null)
+            {
+                // Word comparisons still use hardcoded skipBytes internally
+                if (wordBin.Right is IdentifierExpr wordRight && ctx.Symbols.IsWordVar(wordRight.Name))
+                    EmitWordVarComparisonBranchTrue(wordVarName, wordBin.Op, wordRight.Name, 3);
+                else
+                {
+                    var litVal = ExpressionEmitter.Resolve16BitInitializer("", wordBin.Right);
+                    EmitWordComparisonBranchTrue(wordVarName, wordBin.Op, litVal, 3);
+                }
+                ctx.Buffer.EmitJmpForward(label);
+                return;
+            }
+        }
+
+        // Signed byte vs 0
+        if (condition is BinaryExpr signedBin &&
+            signedBin.Left is IdentifierExpr signedIdent &&
+            ctx.Symbols.TryGetVarType(signedIdent.Name, out var stype) && stype == "sbyte" &&
+            signedBin.Right is IntLiteralExpr { Value: 0 })
+        {
+            var zp = ctx.Symbols.GetLocal(signedIdent.Name);
+            ctx.Buffer.EmitLdaZeroPage(zp);
+            switch (signedBin.Op)
+            {
+                case TokenKind.Less: // true when negative → false when not negative
+                    ctx.Buffer.EmitBplToLabel(label);
+                    break;
+                case TokenKind.GreaterEqual: // true when positive/zero → false when negative
+                    ctx.Buffer.EmitBmiToLabel(label);
+                    break;
+                case TokenKind.Greater: // true when positive non-zero → false when zero or negative
+                    ctx.Buffer.EmitBeqToLabel(label);
+                    ctx.Buffer.EmitBmiToLabel(label);
+                    break;
+                case TokenKind.LessEqual: // true when zero or negative → false when positive non-zero
+                {
+                    var skipLabel = ctx.NextLabel("_cond");
+                    ctx.Buffer.EmitBeqToLabel(skipLabel); // zero → true, skip
+                    ctx.Buffer.EmitBplToLabel(label);     // positive → false
+                    ctx.Buffer.DefineLabel(skipLabel);
+                    break;
+                }
+                default:
+                    throw new InvalidOperationException($"Unsupported signed comparison: {signedBin.Op}");
+            }
+            return;
+        }
+
+        // Byte comparison
+        if (condition is BinaryExpr bin)
+        {
+            ctx.Expressions.EmitExprToA(bin.Left);
+
+            if (bin.Right is IntLiteralExpr intLit)
+                ctx.Buffer.EmitCmpImmediate((byte)intLit.Value);
+            else if (bin.Right is IdentifierExpr ident && ctx.Symbols.TryGetConstant(ident.Name, out var cv))
+                ctx.Buffer.EmitCmpImmediate((byte)cv);
+            else if (bin.Right is IdentifierExpr ident2)
+                ctx.Buffer.EmitCmpZeroPage(ctx.Symbols.GetLocal(ident2.Name));
+            else
+            {
+                ctx.Buffer.EmitPha();
+                ctx.Expressions.EmitExprToA(bin.Right);
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpTemp);
+                ctx.Buffer.EmitPla();
+                ctx.Buffer.EmitCmpZeroPage(EmitContext.ZpTemp);
+            }
+
+            switch (bin.Op)
+            {
+                case TokenKind.Less: // BCC when true → BCS when false
+                    ctx.Buffer.EmitBcsToLabel(label);
+                    break;
+                case TokenKind.GreaterEqual: // BCS when true → BCC when false
+                    ctx.Buffer.EmitBccToLabel(label);
+                    break;
+                case TokenKind.EqualEqual: // BEQ when true → BNE when false
+                    ctx.Buffer.EmitBneToLabel(label);
+                    break;
+                case TokenKind.BangEqual: // BNE when true → BEQ when false
+                    ctx.Buffer.EmitBeqToLabel(label);
+                    break;
+                case TokenKind.Greater: // true when not equal AND carry set → false when equal OR carry clear
+                    ctx.Buffer.EmitBeqToLabel(label);
+                    ctx.Buffer.EmitBccToLabel(label);
+                    break;
+                case TokenKind.LessEqual: // true when equal OR carry clear → false when not equal AND carry set
+                {
+                    var skipLabel = ctx.NextLabel("_cond");
+                    ctx.Buffer.EmitBeqToLabel(skipLabel); // equal → true, skip
+                    ctx.Buffer.EmitBcsToLabel(label);     // greater → false
+                    ctx.Buffer.DefineLabel(skipLabel);
+                    break;
+                }
+                default:
+                    throw new InvalidOperationException($"Unsupported comparison: {bin.Op}");
+            }
+            return;
+        }
+
+        // Bare identifier: true when non-zero → false when zero
+        if (condition is IdentifierExpr bareIdent)
+        {
+            ctx.Expressions.EmitExprToA(bareIdent);
+            ctx.Buffer.EmitBeqToLabel(label); // zero → false
             return;
         }
 

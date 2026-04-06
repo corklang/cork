@@ -53,6 +53,11 @@ public enum StreamEntryKind : byte
     Instruction,
     Label,
     Data,
+    /// <summary>
+    /// A relative branch to a named label. Resolved to a 2-byte branch instruction
+    /// (or 2+3 byte inverted-branch-over-JMP if out of range) during fixup resolution.
+    /// </summary>
+    BranchToLabel,
 }
 
 /// <summary>
@@ -66,6 +71,10 @@ public readonly struct StreamEntry
     public Instruction Instruction { get; private init; }
     public string? LabelName { get; private init; }
     public byte[]? RawData { get; private init; }
+    /// <summary>For BranchToLabel: the branch opcode (BNE, BEQ, etc.).</summary>
+    public byte BranchOpcode { get; private init; }
+    /// <summary>For BranchToLabel: the target label name.</summary>
+    public string? BranchTarget { get; private init; }
 
     /// <summary>Size in bytes when encoded.</summary>
     public int Size => Kind switch
@@ -73,6 +82,7 @@ public readonly struct StreamEntry
         StreamEntryKind.Instruction => Instruction.Size,
         StreamEntryKind.Label => 0,
         StreamEntryKind.Data => RawData?.Length ?? 0,
+        StreamEntryKind.BranchToLabel => 2, // branch opcode + offset (may expand during resolution)
         _ => 0
     };
 
@@ -84,4 +94,11 @@ public readonly struct StreamEntry
 
     public static StreamEntry DataBlob(int id, byte[] data)
         => new() { Id = id, Kind = StreamEntryKind.Data, RawData = data };
+
+    /// <summary>
+    /// A relative branch to a named label. During finalization, resolved to a 2-byte branch
+    /// or expanded to inverted-branch(2) + JMP(3) = 5 bytes if out of range.
+    /// </summary>
+    public static StreamEntry Branch(int id, byte opcode, string targetLabel)
+        => new() { Id = id, Kind = StreamEntryKind.BranchToLabel, BranchOpcode = opcode, BranchTarget = targetLabel };
 }
