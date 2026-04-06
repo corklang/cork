@@ -33,7 +33,7 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         ctx.Buffer.EmitBcc(3);
         ctx.Buffer.EmitClc();
         ctx.Buffer.EmitAdcZeroPage(EmitContext.ZpMulA);
-        ctx.Buffer.EmitByte(0x6A); // ROR A
+        ctx.Buffer.EmitRorAccumulator();
         ctx.Buffer.EmitRorZeroPage(EmitContext.ZpMulB);
         ctx.Buffer.EmitDex();
         ctx.Buffer.EmitBne(unchecked((sbyte)(-11)));
@@ -158,7 +158,7 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         ctx.Buffer.EmitSbcZeroPage(EmitContext.ZpMulB);
         ctx.Buffer.EmitBcc(4); // if remainder < divisor, skip
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpDivRemainder);
-        ctx.Buffer.EmitByte(0xE6); ctx.Buffer.EmitByte(EmitContext.ZpFixedArg1Lo); // INC zpLo (set quotient bit)
+        ctx.Buffer.EmitIncZeroPage(EmitContext.ZpFixedArg1Lo); // INC zpLo (set quotient bit)
         ctx.Buffer.EmitDex();
         // Loop body: ASL(2)+ROL(2)+ROL(2)+LDA(2)+SEC(1)+SBC(2)+BCC(2)+STA(2)+INC(2)+DEX(1)+BNE(2) = 20
         ctx.Buffer.EmitBne(unchecked((sbyte)(-20)));
@@ -218,7 +218,7 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);          // 2
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulB);          // 2
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpDivRemainder); // 2
-        ctx.Buffer.EmitByte(0xE6); ctx.Buffer.EmitByte(EmitContext.ZpFixedArg1Lo); // 2 = 35
+        ctx.Buffer.EmitIncZeroPage(EmitContext.ZpFixedArg1Lo); // 2 = 35
         ctx.Buffer.EmitDex();                                    // 1 = 36
         ctx.Buffer.EmitBne(unchecked((sbyte)(-38)));             // 2 = 38
 
@@ -243,28 +243,28 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         // BPL: skip negate block (INC(2)+LDA(2)+EOR(2)+CLC(1)+ADC(2)+STA(2)+LDA(2)+EOR(2)+ADC(2)+STA(2)=19)
         ctx.Buffer.EmitBpl(19);
         // Negate arg1: flip sign flag, two's complement
-        ctx.Buffer.EmitByte(0xE6); ctx.Buffer.EmitByte(EmitContext.ZpSignFlag); // INC sign
+        ctx.Buffer.EmitIncZeroPage(EmitContext.ZpSignFlag); // INC sign
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Lo);
-        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF); // EOR #$FF
+        ctx.Buffer.EmitEorImmediate(0xFF); // EOR #$FF
         ctx.Buffer.EmitClc();
         ctx.Buffer.EmitAdcImmediate(1);
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Lo);
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
-        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF);
+        ctx.Buffer.EmitEorImmediate(0xFF);
         ctx.Buffer.EmitAdcImmediate(0);
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Hi);
 
         // Check arg2 sign
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg2Hi);
         ctx.Buffer.EmitBpl(19);
-        ctx.Buffer.EmitByte(0xE6); ctx.Buffer.EmitByte(EmitContext.ZpSignFlag);
+        ctx.Buffer.EmitIncZeroPage(EmitContext.ZpSignFlag);
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg2Lo);
-        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF);
+        ctx.Buffer.EmitEorImmediate(0xFF);
         ctx.Buffer.EmitClc();
         ctx.Buffer.EmitAdcImmediate(1);
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg2Lo);
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg2Hi);
-        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF);
+        ctx.Buffer.EmitEorImmediate(0xFF);
         ctx.Buffer.EmitAdcImmediate(0);
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg2Hi);
 
@@ -273,16 +273,16 @@ public sealed class RuntimeLibrary(EmitContext ctx)
 
         // If sign flag is odd, negate result
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpSignFlag);
-        ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(0x01); // AND #1
+        ctx.Buffer.EmitAndImmediate(0x01);
         // BEQ: skip negate (LDA(2)+EOR(2)+CLC(1)+ADC(2)+STA(2)+LDA(2)+EOR(2)+ADC(2)+STA(2)=17)
         ctx.Buffer.EmitBeq(17);
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Lo);
-        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF);
+        ctx.Buffer.EmitEorImmediate(0xFF);
         ctx.Buffer.EmitClc();
         ctx.Buffer.EmitAdcImmediate(1);
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Lo);
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
-        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF);
+        ctx.Buffer.EmitEorImmediate(0xFF);
         ctx.Buffer.EmitAdcImmediate(0);
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Hi);
 
@@ -313,7 +313,7 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         // remainder = remainder - divisor; set bit 0 of quotient
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpDivRemainder);
         // INC ZpMulA (set low bit of quotient — ASL already shifted it)
-        ctx.Buffer.EmitByte(0xE6); ctx.Buffer.EmitByte(EmitContext.ZpMulA); // INC zp
+        ctx.Buffer.EmitIncZeroPage(EmitContext.ZpMulA);
         // DEX; BNE loop
         ctx.Buffer.EmitDex();
         // Loop body: ASL(2) + ROL(2) + LDA(2) + SEC(1) + SBC(2) + BCC(2) + STA(2) + INC(2) + DEX(1) + BNE(2) = 18
@@ -329,34 +329,38 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         {
             ctx.Buffer.DefineLabel("_rt_debughex");
             ctx.Buffer.EmitStxZeroPage(EmitContext.ZpPointerLo);
-            ctx.Buffer.EmitByte(0x84); ctx.Buffer.EmitByte(EmitContext.ZpPointerHi); // STY zp
+            ctx.Buffer.EmitStyZeroPage(EmitContext.ZpPointerHi);
 
             // Digit 0
             ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
-            ctx.Buffer.EmitByte(0x4A); ctx.Buffer.EmitByte(0x4A);
-            ctx.Buffer.EmitByte(0x4A); ctx.Buffer.EmitByte(0x4A);
+            ctx.Buffer.EmitLsrAccumulator();
+            ctx.Buffer.EmitLsrAccumulator();
+            ctx.Buffer.EmitLsrAccumulator();
+            ctx.Buffer.EmitLsrAccumulator();
             ctx.Buffer.EmitJsrForward("_rt_hexchar");
             ctx.Buffer.EmitLdyImmediate(0);
             ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
 
             // Digit 1
             ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
-            ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(0x0F);
+            ctx.Buffer.EmitAndImmediate(0x0F);
             ctx.Buffer.EmitJsrForward("_rt_hexchar");
             ctx.Buffer.EmitLdyImmediate(1);
             ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
 
             // Digit 2
             ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Lo);
-            ctx.Buffer.EmitByte(0x4A); ctx.Buffer.EmitByte(0x4A);
-            ctx.Buffer.EmitByte(0x4A); ctx.Buffer.EmitByte(0x4A);
+            ctx.Buffer.EmitLsrAccumulator();
+            ctx.Buffer.EmitLsrAccumulator();
+            ctx.Buffer.EmitLsrAccumulator();
+            ctx.Buffer.EmitLsrAccumulator();
             ctx.Buffer.EmitJsrForward("_rt_hexchar");
             ctx.Buffer.EmitLdyImmediate(2);
             ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
 
             // Digit 3
             ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Lo);
-            ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(0x0F);
+            ctx.Buffer.EmitAndImmediate(0x0F);
             ctx.Buffer.EmitJsrForward("_rt_hexchar");
             ctx.Buffer.EmitLdyImmediate(3);
             ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
@@ -409,7 +413,7 @@ public sealed class RuntimeLibrary(EmitContext ctx)
             ctx.Buffer.EmitJsrAbsolute(ctx.Buffer.GetLabel("_rt_fixmul"));
 
             ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpSignFlag);
-            ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(0x01); // AND #1
+            ctx.Buffer.EmitAndImmediate(0x01);
             ctx.Buffer.EmitBeq(13);
             ctx.Buffer.EmitLdaImmediate(0);
             ctx.Buffer.EmitSec();
@@ -440,13 +444,13 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         ctx.Buffer.EmitSec(); // carry set = clear mode
 
         // Shared body
-        ctx.Buffer.EmitByte(0x08); // PHP — save set/clear flag
+        ctx.Buffer.EmitPhp();
 
         // charRow = y >> 3
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpTemp);
-        ctx.Buffer.EmitByte(0x4A); // LSR A
-        ctx.Buffer.EmitByte(0x4A); // LSR A
-        ctx.Buffer.EmitByte(0x4A); // LSR A → charRow (0-24)
+        ctx.Buffer.EmitLsrAccumulator();
+        ctx.Buffer.EmitLsrAccumulator();
+        ctx.Buffer.EmitLsrAccumulator();
         ctx.Buffer.EmitTax();
 
         // Row base address from split tables
@@ -457,7 +461,7 @@ public sealed class RuntimeLibrary(EmitContext ctx)
 
         // Add (x & ~7) — character column offset
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulA); // x_lo
-        ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(0xF8); // AND #$F8
+        ctx.Buffer.EmitAndImmediate(0xF8);
         ctx.Buffer.EmitClc();
         ctx.Buffer.EmitAdcZeroPage(EmitContext.ZpPointerLo);
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpPointerLo);
@@ -467,29 +471,29 @@ public sealed class RuntimeLibrary(EmitContext ctx)
 
         // pixelRow = y & 7 → Y register
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpTemp);
-        ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(0x07); // AND #$07
+        ctx.Buffer.EmitAndImmediate(0x07);
         ctx.Buffer.EmitTay();
 
         // Bit mask from x & 7
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulA); // x_lo
-        ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(0x07); // AND #$07
+        ctx.Buffer.EmitAndImmediate(0x07);
         ctx.Buffer.EmitTax();
         ctx.Buffer.EmitLdaAbsoluteXForward("_rt_plotBitTable");
 
         // Set or clear based on saved carry flag
-        ctx.Buffer.EmitByte(0x28); // PLP
+        ctx.Buffer.EmitPlp();
         var clearLabel = ctx.NextLabel("_plotclr");
         ctx.Buffer.EmitBcs(5); // BCS → clear path (skip ORA(2)+STA(2)+RTS(1) = 5 bytes)
 
         // Set pixel: ORA existing byte
-        ctx.Buffer.EmitByte(0x11); ctx.Buffer.EmitByte(EmitContext.ZpPointerLo); // ORA ($FB),Y
-        ctx.Buffer.EmitByte(0x91); ctx.Buffer.EmitByte(EmitContext.ZpPointerLo); // STA ($FB),Y
+        ctx.Buffer.EmitOraIndirectY(EmitContext.ZpPointerLo);
+        ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
         ctx.Buffer.EmitRts();
 
         // Clear pixel: invert mask, AND existing byte
-        ctx.Buffer.EmitByte(0x49); ctx.Buffer.EmitByte(0xFF); // EOR #$FF
-        ctx.Buffer.EmitByte(0x31); ctx.Buffer.EmitByte(EmitContext.ZpPointerLo); // AND ($FB),Y
-        ctx.Buffer.EmitByte(0x91); ctx.Buffer.EmitByte(EmitContext.ZpPointerLo); // STA ($FB),Y
+        ctx.Buffer.EmitEorImmediate(0xFF); // EOR #$FF
+        ctx.Buffer.EmitAndIndirectY(EmitContext.ZpPointerLo);
+        ctx.Buffer.EmitStaIndirectY(EmitContext.ZpPointerLo);
         ctx.Buffer.EmitRts();
 
         // Row address tables (25 entries each, split lo/hi)

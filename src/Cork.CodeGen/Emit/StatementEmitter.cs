@@ -202,7 +202,7 @@ public sealed class StatementEmitter(EmitContext ctx)
         {
             ctx.Expressions.EmitExprToA(assign.Value);
             ctx.Buffer.EmitLdxZeroPage(fesv.IndexZp);
-            ctx.Buffer.EmitByte(0x95); ctx.Buffer.EmitByte(feFieldBase); // STA zp,X
+            ctx.Buffer.EmitStaZeroPageX(feFieldBase);
             return;
         }
 
@@ -250,7 +250,7 @@ public sealed class StatementEmitter(EmitContext ctx)
                 ctx.Expressions.EmitExprToA(zpArrIdx.Index);
                 ctx.Buffer.EmitTax();
                 ctx.Buffer.EmitPla();
-                ctx.Buffer.EmitByte(0x95); ctx.Buffer.EmitByte(zpArrBase); // STA zp,X
+                ctx.Buffer.EmitStaZeroPageX(zpArrBase);
             }
             return;
         }
@@ -278,11 +278,11 @@ public sealed class StatementEmitter(EmitContext ctx)
                 ctx.Buffer.EmitBne(8);
                 // Clear bit: LDA $D010; AND #~bit; JMP end
                 ctx.Buffer.EmitLdaAbsolute(0xD010);
-                ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte((byte)~sprBit);
+                ctx.Buffer.EmitAndImmediate((byte)~sprBit);
                 ctx.Buffer.EmitJmpForward(endLabel);
                 // Set bit: LDA $D010; ORA #bit
                 ctx.Buffer.EmitLdaAbsolute(0xD010);
-                ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(sprBit);
+                ctx.Buffer.EmitOraImmediate(sprBit);
                 // Store result
                 ctx.Buffer.DefineLabel(endLabel);
                 ctx.Buffer.EmitStaAbsolute(0xD010);
@@ -430,7 +430,7 @@ public sealed class StatementEmitter(EmitContext ctx)
                 if (isSigned)
                 {
                     // Sign-extend: ORA #$7F preserves bit 7; BMI skips LDA #0
-                    ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(0x7F); // ORA #$7F
+                    ctx.Buffer.EmitOraImmediate(0x7F);
                     ctx.Buffer.EmitBmi(2); // BMI +2 (skip LDA #0)
                     ctx.Buffer.EmitLdaImmediate(0);
                 }
@@ -450,7 +450,7 @@ public sealed class StatementEmitter(EmitContext ctx)
                 {
                     // Sign-extend byteZp for high byte add (carry preserved through LDA/ORA/BMI)
                     ctx.Buffer.EmitLdaZeroPage(byteZp);
-                    ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(0x7F); // ORA #$7F
+                    ctx.Buffer.EmitOraImmediate(0x7F);
                     ctx.Buffer.EmitBmi(2); // BMI +2 (skip LDA #0)
                     ctx.Buffer.EmitLdaImmediate(0);
                     ctx.Buffer.EmitAdcZeroPage(zpHi); // sign_ext + hi + carry
@@ -472,7 +472,7 @@ public sealed class StatementEmitter(EmitContext ctx)
                 {
                     // Sign-extend byteZp for high byte sub (carry/borrow preserved)
                     ctx.Buffer.EmitLdaZeroPage(byteZp);
-                    ctx.Buffer.EmitByte(0x09); ctx.Buffer.EmitByte(0x7F); // ORA #$7F
+                    ctx.Buffer.EmitOraImmediate(0x7F);
                     ctx.Buffer.EmitBmi(2); // BMI +2 (skip LDA #0)
                     ctx.Buffer.EmitLdaImmediate(0);
                     ctx.Buffer.EmitStaZeroPage(EmitContext.ZpTemp);
@@ -672,10 +672,10 @@ public sealed class StatementEmitter(EmitContext ctx)
                 var lo = (byte)(bwVal & 0xFF);
                 var hi = (byte)(bwVal >> 8);
                 ctx.Buffer.EmitLdaZeroPage(zpLo);
-                ctx.Buffer.EmitByte(immOp); ctx.Buffer.EmitByte(lo);
+                EmitBitwiseImmediate(immOp, lo);
                 ctx.Buffer.EmitStaZeroPage(zpLo);
                 ctx.Buffer.EmitLdaZeroPage(zpHi);
-                ctx.Buffer.EmitByte(immOp); ctx.Buffer.EmitByte(hi);
+                EmitBitwiseImmediate(immOp, hi);
                 ctx.Buffer.EmitStaZeroPage(zpHi);
             }
             else
@@ -702,6 +702,17 @@ public sealed class StatementEmitter(EmitContext ctx)
         else
         {
             throw new InvalidOperationException($"Unsupported word assignment: {op}");
+        }
+    }
+
+    private void EmitBitwiseImmediate(byte opcode, byte value)
+    {
+        switch (opcode)
+        {
+            case 0x29: ctx.Buffer.EmitAndImmediate(value); break;
+            case 0x09: ctx.Buffer.EmitOraImmediate(value); break;
+            case 0x49: ctx.Buffer.EmitEorImmediate(value); break;
+            default: throw new InvalidOperationException($"Unknown bitwise opcode: 0x{opcode:X2}");
         }
     }
 

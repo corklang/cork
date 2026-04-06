@@ -307,7 +307,7 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             var mask = (byte)((1 << recvIdx) | (1 << targIdx));
 
             ctx.Buffer.EmitLdaAbsolute(0xD01E);
-            ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(mask); // AND #mask
+            ctx.Buffer.EmitAndImmediate(mask);
             ctx.Buffer.EmitCmpImmediate(mask);
             ctx.Buffer.EmitBeq((sbyte)skipBytes);
             return;
@@ -321,7 +321,7 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             var mask = (byte)(1 << sprIdx);
 
             ctx.Buffer.EmitLdaAbsolute(0xD01F);
-            ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(mask); // AND #mask
+            ctx.Buffer.EmitAndImmediate(mask);
             ctx.Buffer.EmitBne((sbyte)skipBytes); // BNE = bit set = collision
             return;
         }
@@ -329,8 +329,7 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
         if (IsJoystickCheck(condition, out var bitMask, out var ciaAddr))
         {
             ctx.Buffer.EmitLdaAbsolute(ciaAddr);
-            ctx.Buffer.EmitByte(0x29);
-            ctx.Buffer.EmitByte(bitMask);
+            ctx.Buffer.EmitAndImmediate(bitMask);
             ctx.Buffer.EmitBeq((sbyte)skipBytes);
             return;
         }
@@ -341,7 +340,7 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             ctx.Buffer.EmitLdaImmediate(colSelect);
             ctx.Buffer.EmitStaAbsolute(0xDC00);
             ctx.Buffer.EmitLdaAbsolute(0xDC01);
-            ctx.Buffer.EmitByte(0x29); ctx.Buffer.EmitByte(rowMask); // AND #rowMask
+            ctx.Buffer.EmitAndImmediate(rowMask);
             ctx.Buffer.EmitBeq((sbyte)skipBytes); // BEQ = bit clear = key pressed
             return;
         }

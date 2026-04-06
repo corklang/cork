@@ -74,6 +74,10 @@ public sealed class InstructionBuffer(ushort baseAddress)
 
     public void EmitLdaIndirectY(byte zpAddr)
         => Append(StreamEntry.Instr(NextId(), 0xB1, AddressMode.IndirectY, zpAddr));
+    public void EmitLdaZeroPageX(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0xB5, AddressMode.ZeroPageX, addr));
+    public void EmitStaZeroPageX(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x95, AddressMode.ZeroPageX, addr));
 
     // LDY
     public void EmitLdyZeroPage(byte addr)
@@ -106,6 +110,10 @@ public sealed class InstructionBuffer(ushort baseAddress)
     public void EmitStxZeroPage(byte addr)
         => Append(StreamEntry.Instr(NextId(), 0x86, AddressMode.ZeroPage, addr));
 
+    // STY
+    public void EmitStyZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x84, AddressMode.ZeroPage, addr));
+
     // Arithmetic
     public void EmitClc() => Append(StreamEntry.Instr(NextId(), 0x18, AddressMode.Implied));
     public void EmitSec() => Append(StreamEntry.Instr(NextId(), 0x38, AddressMode.Implied));
@@ -120,6 +128,24 @@ public sealed class InstructionBuffer(ushort baseAddress)
     public void EmitSbcZeroPage(byte addr)
         => Append(StreamEntry.Instr(NextId(), 0xE5, AddressMode.ZeroPage, addr));
 
+    // Bitwise
+    public void EmitAndImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0x29, AddressMode.Immediate, value));
+    public void EmitOraImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0x09, AddressMode.Immediate, value));
+    public void EmitEorImmediate(byte value)
+        => Append(StreamEntry.Instr(NextId(), 0x49, AddressMode.Immediate, value));
+    public void EmitAndZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x25, AddressMode.ZeroPage, addr));
+    public void EmitOraZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x05, AddressMode.ZeroPage, addr));
+    public void EmitEorZeroPage(byte addr)
+        => Append(StreamEntry.Instr(NextId(), 0x45, AddressMode.ZeroPage, addr));
+    public void EmitOraIndirectY(byte zpAddr)
+        => Append(StreamEntry.Instr(NextId(), 0x11, AddressMode.IndirectY, zpAddr));
+    public void EmitAndIndirectY(byte zpAddr)
+        => Append(StreamEntry.Instr(NextId(), 0x31, AddressMode.IndirectY, zpAddr));
+
     // Increment / Decrement
     public void EmitInx() => Append(StreamEntry.Instr(NextId(), 0xE8, AddressMode.Implied));
     public void EmitIny() => Append(StreamEntry.Instr(NextId(), 0xC8, AddressMode.Implied));
@@ -131,6 +157,12 @@ public sealed class InstructionBuffer(ushort baseAddress)
         => Append(StreamEntry.Instr(NextId(), 0xC6, AddressMode.ZeroPage, addr));
 
     // Shift
+    public void EmitAslAccumulator()
+        => Append(StreamEntry.Instr(NextId(), 0x0A, AddressMode.Accumulator));
+    public void EmitLsrAccumulator()
+        => Append(StreamEntry.Instr(NextId(), 0x4A, AddressMode.Accumulator));
+    public void EmitRorAccumulator()
+        => Append(StreamEntry.Instr(NextId(), 0x6A, AddressMode.Accumulator));
     public void EmitLsrZeroPage(byte addr)
         => Append(StreamEntry.Instr(NextId(), 0x46, AddressMode.ZeroPage, addr));
     public void EmitRorZeroPage(byte addr)
@@ -198,6 +230,8 @@ public sealed class InstructionBuffer(ushort baseAddress)
     // Stack
     public void EmitPha() => Append(StreamEntry.Instr(NextId(), 0x48, AddressMode.Implied));
     public void EmitPla() => Append(StreamEntry.Instr(NextId(), 0x68, AddressMode.Implied));
+    public void EmitPhp() => Append(StreamEntry.Instr(NextId(), 0x08, AddressMode.Implied));
+    public void EmitPlp() => Append(StreamEntry.Instr(NextId(), 0x28, AddressMode.Implied));
 
     // Misc
     public void EmitNop() => Append(StreamEntry.Instr(NextId(), 0xEA, AddressMode.Implied));
