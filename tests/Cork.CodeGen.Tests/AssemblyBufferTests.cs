@@ -7,7 +7,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task LDA_immediate_encodes_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitLdaImmediate(42);
         var bytes = buf.ToArray();
         await Assert.That(bytes).Count().IsEqualTo(2);
@@ -18,7 +18,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task STA_absolute_encodes_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitStaAbsolute(0xD020);
         var bytes = buf.ToArray();
         await Assert.That(bytes).Count().IsEqualTo(3);
@@ -30,7 +30,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task LDA_zero_page_encodes_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitLdaZeroPage(0x02);
         var bytes = buf.ToArray();
         await Assert.That(bytes).Count().IsEqualTo(2);
@@ -41,7 +41,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task STA_zero_page_encodes_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitStaZeroPage(0x10);
         var bytes = buf.ToArray();
         await Assert.That(bytes[0]).IsEqualTo((byte)0x85);
@@ -51,7 +51,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task Branch_BNE_encodes_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitBne(unchecked((sbyte)-7));
         var bytes = buf.ToArray();
         await Assert.That(bytes[0]).IsEqualTo((byte)0xD0);
@@ -61,7 +61,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task Branch_BEQ_encodes_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitBeq(5);
         var bytes = buf.ToArray();
         await Assert.That(bytes[0]).IsEqualTo((byte)0xF0);
@@ -71,7 +71,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task JMP_absolute_encodes_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitJmpAbsolute(0x1234);
         var bytes = buf.ToArray();
         await Assert.That(bytes[0]).IsEqualTo((byte)0x4C);
@@ -82,7 +82,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task JSR_absolute_encodes_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitJsrAbsolute(0xABCD);
         var bytes = buf.ToArray();
         await Assert.That(bytes[0]).IsEqualTo((byte)0x20);
@@ -93,7 +93,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task RTS_encodes_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitRts();
         var bytes = buf.ToArray();
         await Assert.That(bytes).Count().IsEqualTo(1);
@@ -103,7 +103,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task CurrentAddress_tracks_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         await Assert.That(buf.CurrentAddress).IsEqualTo((ushort)0x0800);
         buf.EmitLdaImmediate(0);
         await Assert.That(buf.CurrentAddress).IsEqualTo((ushort)0x0802);
@@ -114,7 +114,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task DefineLabel_and_GetLabel_work()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitNop();
         buf.DefineLabel("test_label");
         var addr = buf.GetLabel("test_label");
@@ -124,7 +124,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task Forward_reference_resolves_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitJmpForward("target");  // 3 bytes: JMP $0000
         buf.EmitNop();                  // 1 byte at $0803
         buf.EmitNop();                  // 1 byte at $0804
@@ -140,7 +140,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task ADC_immediate_encodes_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitAdcImmediate(10);
         var bytes = buf.ToArray();
         await Assert.That(bytes[0]).IsEqualTo((byte)0x69);
@@ -150,7 +150,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task SBC_immediate_encodes_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitSbcImmediate(5);
         var bytes = buf.ToArray();
         await Assert.That(bytes[0]).IsEqualTo((byte)0xE9);
@@ -160,7 +160,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task CMP_immediate_encodes_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitCmpImmediate(255);
         var bytes = buf.ToArray();
         await Assert.That(bytes[0]).IsEqualTo((byte)0xC9);
@@ -170,7 +170,7 @@ public class AssemblyBufferTests
     [Test]
     public async Task SEI_and_CLI_encode_correctly()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitSei();
         buf.EmitCli();
         var bytes = buf.ToArray();
@@ -183,9 +183,10 @@ public class AssemblyBufferTests
     [Test]
     public async Task Peephole_removes_redundant_LDA_immediate()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitLdaImmediate(10); // will be removed
         buf.EmitLdaImmediate(20); // keeps this one
+        buf.Optimize();
 
         var bytes = buf.ToArray();
         await Assert.That(bytes).Count().IsEqualTo(2);
@@ -197,10 +198,11 @@ public class AssemblyBufferTests
     [Test]
     public async Task Peephole_removes_STA_LDA_same_zeropage()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitLdaImmediate(42);
         buf.EmitStaZeroPage(0x02);
         buf.EmitLdaZeroPage(0x02); // redundant — A already holds 42
+        buf.Optimize();
 
         var bytes = buf.ToArray();
         // Should be: LDA #42, STA $02 (4 bytes, LDA zp removed)
@@ -211,10 +213,11 @@ public class AssemblyBufferTests
     [Test]
     public async Task Peephole_keeps_STA_LDA_different_zeropage()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitLdaImmediate(42);
         buf.EmitStaZeroPage(0x02);
         buf.EmitLdaZeroPage(0x03); // different address — must keep
+        buf.Optimize();
 
         var bytes = buf.ToArray();
         await Assert.That(bytes).Count().IsEqualTo(6);
@@ -224,10 +227,11 @@ public class AssemblyBufferTests
     [Test]
     public async Task Peephole_resets_at_label()
     {
-        var buf = new AssemblyBuffer(0x0800);
+        var buf = new InstructionBuffer(0x0800);
         buf.EmitStaZeroPage(0x02);
         buf.DefineLabel("target"); // branch target — resets peephole
         buf.EmitLdaZeroPage(0x02); // must NOT be removed
+        buf.Optimize();
 
         var bytes = buf.ToArray();
         await Assert.That(bytes).Count().IsEqualTo(4); // STA zp + LDA zp
