@@ -2,7 +2,7 @@
 // Draws 6400+ pixels in the enter block (< 1 second).
 // Old Cork method plotPixel: this would take ~16 seconds.
 
-import "../stdlib/bitmap.cork";
+import "stdlib/bitmap.cork";
 
 entry scene Demo {
     hardware {

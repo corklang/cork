@@ -1,5 +1,5 @@
 // Test: bitmap plotting stdlib
-import "../stdlib/bitmap.cork";
+import "stdlib/bitmap.cork";
 
 entry scene Test {
     hardware {

@@ -1,8 +1,8 @@
 // Feature: keyboard input — direct scanning and debounced text entry
 
-import "../stdlib/keyboard.cork";
-import "../stdlib/screen.cork";
-import "../stdlib/print.cork";
+import "stdlib/keyboard.cork";
+import "stdlib/screen.cork";
+import "stdlib/print.cork";
 
 const byte CHAR_BALL = 81;
 const byte CHAR_CURSOR = 160;

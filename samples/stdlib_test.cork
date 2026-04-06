@@ -1,11 +1,11 @@
 // Test: standard library functions
-import "../stdlib/math.cork";
-import "../stdlib/screen.cork";
-import "../stdlib/print.cork";
-import "../stdlib/random.cork";
-import "../stdlib/memory.cork";
-import "../stdlib/input.cork";
-import "../stdlib/sprite.cork";
+import "stdlib/math.cork";
+import "stdlib/screen.cork";
+import "stdlib/print.cork";
+import "stdlib/random.cork";
+import "stdlib/memory.cork";
+import "stdlib/input.cork";
+import "stdlib/sprite.cork";
 
 entry scene Test {
     hardware {

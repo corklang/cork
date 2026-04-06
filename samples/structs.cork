@@ -1,6 +1,6 @@
 // Phase 4: Structs with fields and methods
-import "../stdlib/screen.cork";
-import "../stdlib/color.cork";
+import "stdlib/screen.cork";
+import "stdlib/color.cork";
 
 struct Player {
     byte pos = 120;

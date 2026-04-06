@@ -1,6 +1,6 @@
 // Smooth horizontal text scroller
-import "../stdlib/screen.cork";
-import "../stdlib/scroll.cork";
+import "stdlib/screen.cork";
+import "stdlib/scroll.cork";
 
 entry scene Scroller {
     hardware {

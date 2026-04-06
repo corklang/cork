@@ -40,18 +40,20 @@ for (var i = 1; i < args.Length - 1; i++)
     if (args[i] == "-o") outputPath = args[i + 1];
 }
 
-// Resolve stdlib: CORK_STDLIB env var, or ../share/corklang/stdlib relative to binary
+// Resolve stdlib search root: imports like "stdlib/screen.cork" resolve against this.
+// Check CORK_STDLIB env var, then Homebrew layout (../share/corklang), then CWD.
 string? stdlibPath = Environment.GetEnvironmentVariable("CORK_STDLIB");
 if (stdlibPath == null)
 {
     var binDir = Path.GetDirectoryName(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar));
     if (binDir != null)
     {
-        var candidate = Path.Combine(binDir, "share", "corklang", "stdlib");
-        if (Directory.Exists(candidate))
+        var candidate = Path.Combine(binDir, "share", "corklang");
+        if (Directory.Exists(Path.Combine(candidate, "stdlib")))
             stdlibPath = candidate;
     }
 }
+stdlibPath ??= Directory.GetCurrentDirectory();
 
 try
 {

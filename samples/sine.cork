@@ -1,5 +1,5 @@
 // Smooth sine curve plotted in bitmap mode — pixel-perfect lookup tables
-import "../stdlib/bitmap.cork";
+import "stdlib/bitmap.cork";
 
 entry scene Sine {
     hardware {

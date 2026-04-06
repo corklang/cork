@@ -1,6 +1,6 @@
 // Feature: enum and switch
-import "../stdlib/screen.cork";
-import "../stdlib/color.cork";
+import "stdlib/screen.cork";
+import "stdlib/color.cork";
 
 enum State : byte {
     title = 0,
