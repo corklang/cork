@@ -97,17 +97,19 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             var selectorName = string.Join("", msgSend.Segments.Select(s => s.Name + ":"));
             var label = $"_method_{selectorName}";
 
-            // Caller-save: if we're inside a method, push its params to the stack
+            // Caller-save: if we're inside a method, push its params AND locals to the stack
             byte callerSaveCount = 0;
             byte callerSaveLo = 0;
             if (ctx.ActiveMethodSelector != null)
             {
-                var (lo, hi) = ctx.Symbols.GetMethodParamRange(ctx.ActiveMethodSelector);
-                callerSaveCount = (byte)(hi - lo);
-                callerSaveLo = lo;
+                var (paramLo, paramHi) = ctx.Symbols.GetMethodParamRange(ctx.ActiveMethodSelector);
+                // Save from param start through current locals end
+                callerSaveLo = paramLo;
+                var localsEnd = ctx.Symbols.CurrentNextZp;
+                callerSaveCount = (byte)(localsEnd - paramLo);
                 for (byte s = 0; s < callerSaveCount; s++)
                 {
-                    ctx.Buffer.EmitLdaZeroPage((byte)(lo + s));
+                    ctx.Buffer.EmitLdaZeroPage((byte)(callerSaveLo + s));
                     ctx.Buffer.EmitPha();
                 }
             }
@@ -201,13 +203,16 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             ctx.Buffer.EmitJsrForward(label);
 
             // Caller-restore: pull saved params back from stack (reverse order)
+            // Save return value (in A) to ZpTemp first so PLA doesn't clobber it
             if (callerSaveCount > 0)
             {
+                ctx.Buffer.EmitStaZeroPage(EmitContext.ZpTemp);
                 for (var s = callerSaveCount - 1; s >= 0; s--)
                 {
                     ctx.Buffer.EmitPla();
                     ctx.Buffer.EmitStaZeroPage((byte)(callerSaveLo + s));
                 }
+                ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpTemp);
             }
             return;
         }

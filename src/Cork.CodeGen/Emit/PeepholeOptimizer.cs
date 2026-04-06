@@ -124,21 +124,10 @@ public static class PeepholeOptimizer
             return 2;
         }
 
-        // Rule: CLC; ADC #0 → remove both (addition of zero)
-        if (ai.Opcode == 0x18 && bi.Opcode == 0x69 && bi.Operand == 0)
-        {
-            entries.RemoveAt(j);
-            entries.RemoveAt(i);
-            return 3;
-        }
-
-        // Rule: SEC; SBC #0 → remove both (subtraction of zero)
-        if (ai.Opcode == 0x38 && bi.Opcode == 0xE9 && bi.Operand == 0)
-        {
-            entries.RemoveAt(j);
-            entries.RemoveAt(i);
-            return 3;
-        }
+        // Note: CLC; ADC #0 and SEC; SBC #0 are NOT safe to remove.
+        // In 16-bit arithmetic (lo then hi), the carry from the lo-byte
+        // add/sub propagates to the hi-byte ADC/SBC. Removing the lo-byte
+        // operation also removes the carry setup (CLC/SEC).
 
         return 0;
     }

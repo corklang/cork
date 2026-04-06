@@ -33,6 +33,7 @@ public sealed class SymbolTable
     private readonly Dictionary<byte, ushort> _spriteSyncRegs = [];
 
     private byte _nextZp = 0x02;
+    public byte CurrentNextZp => _nextZp;
     private byte _globalZpEnd = 0x02;
     // Shared param zone: all methods reuse the same ZP region for params
     private const byte ParamZoneBase = 0x80;
@@ -263,19 +264,30 @@ public sealed class SymbolTable
     private byte _methodLocalsHighWater;
 
     /// <summary>
-    /// Prepare ZP for method body locals. Each method gets a unique region
-    /// that doesn't overlap with other methods (important for nested calls).
+    /// Prepare ZP for method body locals. All methods reuse the same region
+    /// starting after the param zone. The compiler emits caller-save code at
+    /// call sites to protect active locals across nested calls.
+    /// Clears stale method-local names so a new method's variables get fresh allocations.
     /// </summary>
-    public void PrepareMethodLocals()
+    public byte PrepareMethodLocals()
     {
         if (_methodLocalsHighWater < _paramZoneEnd)
             _methodLocalsHighWater = _paramZoneEnd;
-        _nextZp = _methodLocalsHighWater;
+        // Remove stale locals from the method-local zone so new methods
+        // don't reuse addresses from previously emitted methods
+        var stale = _locals.Where(kv => kv.Value >= _paramZoneEnd && !_globals.ContainsKey(kv.Key))
+                           .Select(kv => kv.Key).ToList();
+        foreach (var name in stale)
+        {
+            _locals.Remove(name);
+            _varTypes.Remove(name);
+        }
+        _nextZp = _paramZoneEnd;
+        return _paramZoneEnd;
     }
 
     /// <summary>
-    /// Called after method body emission to record how much ZP this method used.
-    /// The next method's locals will start after this method's.
+    /// Called after method body emission to record peak ZP usage.
     /// </summary>
     public void FinalizeMethodLocals()
     {

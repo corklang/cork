@@ -186,6 +186,82 @@ public sealed class StatementEmitter(EmitContext ctx)
         }
     }
 
+    /// <summary>Emit compound assignment for ZP array element: arr[i] op= value</summary>
+    private void EmitZpArrayCompoundAssign(IndexExpr idx, byte zpBase, TokenKind op, ExprNode value)
+    {
+        // Load current array element into A
+        if (idx.Index is IntLiteralExpr constIdx)
+        {
+            var addr = (byte)(zpBase + (int)constIdx.Value);
+            EmitArrayCompoundOp(op, value, () => ctx.Buffer.EmitLdaZeroPage(addr), () => ctx.Buffer.EmitStaZeroPage(addr));
+        }
+        else
+        {
+            // Dynamic index: compute index into X, then use zp,X addressing
+            ctx.Expressions.EmitExprToA(idx.Index);
+            ctx.Buffer.EmitTax();
+            EmitArrayCompoundOp(op, value,
+                () => ctx.Buffer.EmitLdaZeroPageX(zpBase),
+                () => ctx.Buffer.EmitStaZeroPageX(zpBase));
+        }
+    }
+
+    /// <summary>Emit compound assignment for absolute memory array element: arr[i] op= value</summary>
+    private void EmitAbsArrayCompoundAssign(IndexExpr idx, ushort baseAddr, TokenKind op, ExprNode value)
+    {
+        if (idx.Index is IntLiteralExpr constIdx)
+        {
+            var addr = (ushort)(baseAddr + (int)constIdx.Value);
+            EmitArrayCompoundOp(op, value, () => ctx.Buffer.EmitLdaAbsolute(addr), () => ctx.Buffer.EmitStaAbsolute(addr));
+        }
+        else
+        {
+            ctx.Expressions.EmitExprToA(idx.Index);
+            ctx.Buffer.EmitTax();
+            EmitArrayCompoundOp(op, value,
+                () => ctx.Buffer.EmitLdaAbsoluteX(baseAddr),
+                () => ctx.Buffer.EmitStaAbsoluteX(baseAddr));
+        }
+    }
+
+    /// <summary>Emit the load-op-store sequence for array compound assignment.</summary>
+    private void EmitArrayCompoundOp(TokenKind op, ExprNode value, Action emitLoad, Action emitStore)
+    {
+        switch (op)
+        {
+            case TokenKind.PlusEqual:
+                emitLoad();
+                ctx.Buffer.EmitClc();
+                ctx.Expressions.EmitAdcValue(value);
+                emitStore();
+                break;
+            case TokenKind.MinusEqual:
+                emitLoad();
+                ctx.Buffer.EmitSec();
+                ctx.Expressions.EmitSbcValue(value);
+                emitStore();
+                break;
+            case TokenKind.AmpEqual:
+                emitLoad();
+                ctx.Expressions.EmitBitwiseOp(0x29, 0x25, value);
+                emitStore();
+                break;
+            case TokenKind.PipeEqual:
+                emitLoad();
+                ctx.Expressions.EmitBitwiseOp(0x09, 0x05, value);
+                emitStore();
+                break;
+            case TokenKind.CaretEqual:
+                emitLoad();
+                ctx.Expressions.EmitBitwiseOp(0x49, 0x45, value);
+                emitStore();
+                break;
+            default:
+                throw new CompileError($"Unsupported array compound assignment operator: {op}",
+                    value.Location);
+        }
+    }
+
     private static bool TryMapToCompoundOp(TokenKind binaryOp, out TokenKind compoundOp)
     {
         compoundOp = binaryOp switch
@@ -246,43 +322,53 @@ public sealed class StatementEmitter(EmitContext ctx)
         {
             zp = (byte)(strInfo.ZpBase + (int)strIdx.Value);
         }
-        // Mutable data array indexed assignment: arr[i] = value; (absolute memory)
+        // Mutable data array indexed assignment: arr[i] = value; arr[i] += value; etc. (absolute memory)
         else if (assign.Target is IndexExpr { Receiver: IdentifierExpr mutArrIdent } mutArrIdx &&
-                 ctx.MutableDataAddresses.TryGetValue(mutArrIdent.Name, out var mutArrAddr) &&
-                 assign.Op == TokenKind.Equal)
+                 ctx.MutableDataAddresses.TryGetValue(mutArrIdent.Name, out var mutArrAddr))
         {
-            ctx.Expressions.EmitExprToA(assign.Value);
-            if (mutArrIdx.Index is IntLiteralExpr constMutIdx)
+            if (assign.Op == TokenKind.Equal)
             {
-                ctx.Buffer.EmitStaAbsolute((ushort)(mutArrAddr + (int)constMutIdx.Value));
+                ctx.Expressions.EmitExprToA(assign.Value);
+                if (mutArrIdx.Index is IntLiteralExpr constMutIdx)
+                    ctx.Buffer.EmitStaAbsolute((ushort)(mutArrAddr + (int)constMutIdx.Value));
+                else
+                {
+                    ctx.Buffer.EmitPha();
+                    ctx.Expressions.EmitExprToA(mutArrIdx.Index);
+                    ctx.Buffer.EmitTax();
+                    ctx.Buffer.EmitPla();
+                    ctx.Buffer.EmitStaAbsoluteX(mutArrAddr);
+                }
             }
             else
             {
-                ctx.Buffer.EmitPha();
-                ctx.Expressions.EmitExprToA(mutArrIdx.Index);
-                ctx.Buffer.EmitTax();
-                ctx.Buffer.EmitPla();
-                ctx.Buffer.EmitStaAbsoluteX(mutArrAddr);
+                // Compound assignment: load current value, apply op, store back
+                EmitAbsArrayCompoundAssign(mutArrIdx, mutArrAddr, assign.Op, assign.Value);
             }
             return;
         }
-        // ZP mutable array indexed assignment: arr[i] = value;
+        // ZP mutable array indexed assignment: arr[i] = value; arr[i] += value; etc.
         else if (assign.Target is IndexExpr { Receiver: IdentifierExpr zpArrIdent } zpArrIdx &&
-                 ctx.Symbols.TryGetLocal(zpArrIdent.Name, out var zpArrBase) &&
-                 assign.Op == TokenKind.Equal)
+                 ctx.Symbols.TryGetLocal(zpArrIdent.Name, out var zpArrBase))
         {
-            ctx.Expressions.EmitExprToA(assign.Value);
-            if (zpArrIdx.Index is IntLiteralExpr constArrIdx)
+            if (assign.Op == TokenKind.Equal)
             {
-                ctx.Buffer.EmitStaZeroPage((byte)(zpArrBase + (int)constArrIdx.Value));
+                ctx.Expressions.EmitExprToA(assign.Value);
+                if (zpArrIdx.Index is IntLiteralExpr constArrIdx)
+                    ctx.Buffer.EmitStaZeroPage((byte)(zpArrBase + (int)constArrIdx.Value));
+                else
+                {
+                    ctx.Buffer.EmitPha();
+                    ctx.Expressions.EmitExprToA(zpArrIdx.Index);
+                    ctx.Buffer.EmitTax();
+                    ctx.Buffer.EmitPla();
+                    ctx.Buffer.EmitStaZeroPageX(zpArrBase);
+                }
             }
             else
             {
-                ctx.Buffer.EmitPha();
-                ctx.Expressions.EmitExprToA(zpArrIdx.Index);
-                ctx.Buffer.EmitTax();
-                ctx.Buffer.EmitPla();
-                ctx.Buffer.EmitStaZeroPageX(zpArrBase);
+                // Compound assignment: load current value, apply op, store back
+                EmitZpArrayCompoundAssign(zpArrIdx, zpArrBase, assign.Op, assign.Value);
             }
             return;
         }
