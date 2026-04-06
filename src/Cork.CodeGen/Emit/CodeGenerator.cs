@@ -70,6 +70,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         var measureCtx = CreateContext(codeBase, dataAddresses);
         RegisterAllTypes(measureCtx, program, globalVars, constArraySizes, inlineSprites, reachable.Methods);
         EmitCode(measureCtx, program, scenes, globalVars, entryScene, reachable.Methods, usesRandom);
+        measureCtx.Buffer.Optimize();
         var measureInlineData = measureCtx.FinalizeInlineData(
             (ushort)(codeBase + measureCtx.Buffer.Length + constDataSize));
 
@@ -87,6 +88,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
             ctx.Symbols.AddConstantNoShadowCheck(ptrName, spritePointers[dataName]);
         }
         EmitCode(ctx, program, scenes, globalVars, entryScene, reachable.Methods, usesRandom);
+        ctx.Buffer.Optimize();
 
         if (ctx.Errors.Count > 0)
             throw new AggregateCompileError(ctx.Errors);
@@ -241,6 +243,7 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
 
         var entryScene = scenes.First(s => s.IsEntry);
         EmitCode(ctx, program, scenes, globalVars, entryScene, reachableMethods, usesRandom);
+        ctx.Buffer.Optimize();
         return ctx.Buffer.ToArray();
     }
 
