@@ -115,12 +115,15 @@ public sealed class StatementEmitter(EmitContext ctx)
                 EmitWordInit(zp, typeName, bin.Left);
                 EmitWordAssignment(zp, compoundOp, bin.Right);
             }
+            else if (initializer != null)
+            {
+                EmitWordInit(zp, typeName, initializer);
+            }
             else
             {
-                var val = ExpressionEmitter.Resolve16BitInitializer(typeName, initializer);
-                ctx.Buffer.EmitLdaImmediate((byte)(val & 0xFF));
+                // No initializer — zero-fill
+                ctx.Buffer.EmitLdaImmediate(0);
                 ctx.Buffer.EmitStaZeroPage(zp);
-                ctx.Buffer.EmitLdaImmediate((byte)(val >> 8));
                 ctx.Buffer.EmitStaZeroPage((byte)(zp + 1));
             }
         }
@@ -157,7 +160,15 @@ public sealed class StatementEmitter(EmitContext ctx)
             ctx.Buffer.EmitLdaZeroPage((byte)(srcZp + 1));
             ctx.Buffer.EmitStaZeroPage(zpHi);
         }
-        else if (ctx.Expressions.TryFoldConstant(expr, out _) || expr is FixedLiteralExpr || expr is UnaryExpr)
+        else if (ctx.Expressions.TryFoldConstant(expr, out var foldedVal))
+        {
+            var val = (ushort)(foldedVal & 0xFFFF);
+            ctx.Buffer.EmitLdaImmediate((byte)(val & 0xFF));
+            ctx.Buffer.EmitStaZeroPage(zp);
+            ctx.Buffer.EmitLdaImmediate((byte)(val >> 8));
+            ctx.Buffer.EmitStaZeroPage(zpHi);
+        }
+        else if (expr is FixedLiteralExpr || expr is UnaryExpr { Op: TokenKind.Minus })
         {
             var val = ExpressionEmitter.Resolve16BitInitializer(typeName, expr);
             ctx.Buffer.EmitLdaImmediate((byte)(val & 0xFF));
@@ -234,6 +245,26 @@ public sealed class StatementEmitter(EmitContext ctx)
                  ctx.Symbols.TryGetStringVar(strIdent.Name, out var strInfo))
         {
             zp = (byte)(strInfo.ZpBase + (int)strIdx.Value);
+        }
+        // Mutable data array indexed assignment: arr[i] = value; (absolute memory)
+        else if (assign.Target is IndexExpr { Receiver: IdentifierExpr mutArrIdent } mutArrIdx &&
+                 ctx.MutableDataAddresses.TryGetValue(mutArrIdent.Name, out var mutArrAddr) &&
+                 assign.Op == TokenKind.Equal)
+        {
+            ctx.Expressions.EmitExprToA(assign.Value);
+            if (mutArrIdx.Index is IntLiteralExpr constMutIdx)
+            {
+                ctx.Buffer.EmitStaAbsolute((ushort)(mutArrAddr + (int)constMutIdx.Value));
+            }
+            else
+            {
+                ctx.Buffer.EmitPha();
+                ctx.Expressions.EmitExprToA(mutArrIdx.Index);
+                ctx.Buffer.EmitTax();
+                ctx.Buffer.EmitPla();
+                ctx.Buffer.EmitStaAbsoluteX(mutArrAddr);
+            }
+            return;
         }
         // ZP mutable array indexed assignment: arr[i] = value;
         else if (assign.Target is IndexExpr { Receiver: IdentifierExpr zpArrIdent } zpArrIdx &&

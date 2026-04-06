@@ -61,6 +61,27 @@ public sealed class EmitContext
     // For-each over ref param (string/array passed by reference)
     public (byte PtrLo, byte PtrHi, byte LenZp)? ForEachRefParam { get; set; }
 
+    // Mutable data arrays: large mutable arrays stored in absolute memory (not ZP)
+    // Maps array name → absolute address (resolved after code size is known)
+    public Dictionary<string, ushort> MutableDataAddresses { get; } = [];
+    private readonly List<(string Name, int Size)> _mutableDataArrays = [];
+    public int MutableDataSize => _mutableDataArrays.Sum(a => a.Size);
+
+    public void RegisterMutableDataArray(string name, int size)
+    {
+        _mutableDataArrays.Add((name, size));
+    }
+
+    public void ResolveMutableDataAddresses(ushort baseAddr)
+    {
+        var offset = 0;
+        foreach (var (name, size) in _mutableDataArrays)
+        {
+            MutableDataAddresses[name] = (ushort)(baseAddr + offset);
+            offset += size;
+        }
+    }
+
     // Const array sizes (populated during code generation)
     private readonly Dictionary<string, int> _constArraySizes = [];
 
@@ -109,6 +130,9 @@ public sealed class EmitContext
     }
 
     public int InlineDataSize => _inlineData.Sum(d => d.Data.Length);
+
+    // Active method selector (set during method body emission for caller-save param protection)
+    public string? ActiveMethodSelector { get; set; }
 
     // Current scene's graphics mode (set during hardware block emission)
     public bool IsBitmapMode { get; set; }

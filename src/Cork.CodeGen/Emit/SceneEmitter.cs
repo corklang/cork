@@ -444,7 +444,10 @@ public sealed class SceneEmitter(EmitContext ctx)
         ctx.Buffer.DefineLabel(label);
         var methodStartMarker = ctx.Buffer.EmitDebugMarker();
         ctx.Debug?.OpenScope(ctx.Debug.Methods, method.SelectorName, methodStartMarker);
+        var prevMethod = ctx.ActiveMethodSelector;
+        ctx.ActiveMethodSelector = method.SelectorName;
         ctx.Statements.EmitBlock(method.Body);
+        ctx.ActiveMethodSelector = prevMethod;
         ctx.Buffer.EmitRts();
         var methodEndMarker = ctx.Buffer.EmitDebugMarker();
         ctx.Debug?.CloseScope(ctx.Debug.Methods, method.SelectorName, methodEndMarker);
@@ -547,7 +550,10 @@ public sealed class SceneEmitter(EmitContext ctx)
                     }
                 }
 
+                var prevMethod2 = ctx.ActiveMethodSelector;
+                ctx.ActiveMethodSelector = method.SelectorName;
                 ctx.Statements.EmitBlock(method.Body);
+                ctx.ActiveMethodSelector = prevMethod2;
                 ctx.Buffer.EmitRts();
 
                 // Remove temporary nested instance registrations

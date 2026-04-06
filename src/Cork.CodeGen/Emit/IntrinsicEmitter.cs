@@ -97,6 +97,21 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             var selectorName = string.Join("", msgSend.Segments.Select(s => s.Name + ":"));
             var label = $"_method_{selectorName}";
 
+            // Caller-save: if we're inside a method, push its params to the stack
+            byte callerSaveCount = 0;
+            byte callerSaveLo = 0;
+            if (ctx.ActiveMethodSelector != null)
+            {
+                var (lo, hi) = ctx.Symbols.GetMethodParamRange(ctx.ActiveMethodSelector);
+                callerSaveCount = (byte)(hi - lo);
+                callerSaveLo = lo;
+                for (byte s = 0; s < callerSaveCount; s++)
+                {
+                    ctx.Buffer.EmitLdaZeroPage((byte)(lo + s));
+                    ctx.Buffer.EmitPha();
+                }
+            }
+
             if (ctx.Symbols.TryGetMethodParams(selectorName, out var methodParams) &&
                 ctx.Symbols.TryGetMethodParamZp(selectorName, out var paramZpMap))
             {
@@ -184,6 +199,16 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
             }
 
             ctx.Buffer.EmitJsrForward(label);
+
+            // Caller-restore: pull saved params back from stack (reverse order)
+            if (callerSaveCount > 0)
+            {
+                for (var s = callerSaveCount - 1; s >= 0; s--)
+                {
+                    ctx.Buffer.EmitPla();
+                    ctx.Buffer.EmitStaZeroPage((byte)(callerSaveLo + s));
+                }
+            }
             return;
         }
 

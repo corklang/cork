@@ -34,7 +34,7 @@ public class SampleSnapshotTests
         var program = parser.ParseProgram();
         var codeStart = PrgWriter.CalculateCodeStart();
         var codeGen = new CodeGenerator(codeStart);
-        var (machineCode, _, _) = codeGen.Generate(program);
+        var (machineCode, _, _, _) = codeGen.Generate(program);
         var prg = PrgWriter.Create(machineCode);
 
         // Compare against baseline

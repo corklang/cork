@@ -82,7 +82,7 @@ try
     // Generate 6510 code
     var codeStart = PrgWriter.CalculateCodeStart();
     var codeGen = new CodeGenerator(codeStart);
-    var (machineCode, _, peepholeRemovals) = codeGen.Generate(program);
+    var (machineCode, _, peepholeRemovals, mutableDataSize) = codeGen.Generate(program);
 
     // Write PRG
     PrgWriter.WriteToFile(outputPath, machineCode);
@@ -99,12 +99,13 @@ try
     }
 
     // Memory usage report
-    var codeEnd = (ushort)(codeStart + machineCode.Length);
+    var totalRam = machineCode.Length + mutableDataSize;
+    var codeEnd = (ushort)(codeStart + totalRam);
     var availableRam = 0x9FFF - codeStart; // $080E to $9FFF (BASIC ROM banked out)
-    var usedPercent = machineCode.Length * 100 / availableRam;
-    Console.WriteLine($"  Code:   ${codeStart:X4}-${codeEnd:X4} ({machineCode.Length} bytes)");
+    var usedPercent = totalRam * 100 / availableRam;
+    Console.WriteLine($"  Code:   ${codeStart:X4}-${codeEnd:X4} ({totalRam} bytes)");
     Console.WriteLine($"  Output: {outputPath} ({fileSize} bytes)");
-    Console.WriteLine($"  RAM:    {machineCode.Length}/{availableRam} bytes used ({usedPercent}%)");
+    Console.WriteLine($"  RAM:    {totalRam}/{availableRam} bytes used ({usedPercent}%)");
     if (peepholeRemovals > 0)
         Console.WriteLine($"  Peephole: {peepholeRemovals} bytes removed");
 

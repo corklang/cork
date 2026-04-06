@@ -100,6 +100,14 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 ctx.Buffer.EmitLdaAbsoluteX(dataAddr);
                 break;
 
+            // Mutable data array indexing: arr[i] where arr is in absolute memory
+            case IndexExpr { Receiver: IdentifierExpr mutArrName } mutIndexExpr
+                when ctx.MutableDataAddresses.TryGetValue(mutArrName.Name, out var mutAddr):
+                EmitExprToA(mutIndexExpr.Index);
+                ctx.Buffer.EmitTax();
+                ctx.Buffer.EmitLdaAbsoluteX(mutAddr);
+                break;
+
             // ZP mutable array indexing: arr[i] where arr is in zero page
             case IndexExpr { Receiver: IdentifierExpr zpArrName } zpIndexExpr
                 when ctx.Symbols.TryGetLocal(zpArrName.Name, out _):
