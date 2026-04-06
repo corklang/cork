@@ -1,13 +1,30 @@
+using System.Reflection;
 using Cork.Language.Lexing;
 using Cork.Language.Parsing;
 using Cork.CodeGen;
 using Cork.CodeGen.Emit;
 using Cork.Output.Prg;
 
-if (args.Length == 0)
+var version = Assembly.GetExecutingAssembly()
+    .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
+
+if (args.Length == 0 || args[0] is "--help" or "-h")
 {
-    Console.Error.WriteLine("Usage: cork <source.cork> [-o output.prg]");
-    return 1;
+    Console.WriteLine($"Cork {version} — a programming language for the Commodore 64");
+    Console.WriteLine();
+    Console.WriteLine("Usage: cork <source.cork> [-o output.prg]");
+    Console.WriteLine();
+    Console.WriteLine("Options:");
+    Console.WriteLine("  -o <file>    Output file path (default: <source>.prg)");
+    Console.WriteLine("  --version    Print version");
+    Console.WriteLine("  --help, -h   Print this help");
+    return 0;
+}
+
+if (args[0] is "--version")
+{
+    Console.WriteLine(version);
+    return 0;
 }
 
 var sourcePath = args[0];
