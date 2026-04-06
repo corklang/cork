@@ -114,6 +114,11 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
                     ctx.Debug.AddVariable(fullName, inst.StructType, zp, 1, "global");
                 }
             }
+            foreach (var (name, info) in ctx.Symbols.StringVars)
+            {
+                if (name.StartsWith('_')) continue;
+                ctx.Debug.AddVariable(name, "string", info.ZpBase, info.Length, "global");
+            }
             LastDebugInfo = ctx.Debug;
         }
 

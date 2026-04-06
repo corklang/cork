@@ -396,4 +396,8 @@ public sealed class SymbolTable
     // --- Locals access (for debug info) ---
 
     public IEnumerable<KeyValuePair<string, byte>> Locals => _locals;
+
+    // --- String variables access (for debug info) ---
+
+    public IEnumerable<KeyValuePair<string, (byte ZpBase, int Length)>> StringVars => _stringVars;
 }

@@ -74,6 +74,11 @@ public sealed class SceneEmitter(EmitContext ctx)
                 foreach (var (field, zp) in inst.Fields)
                     ctx.Debug.AddVariable($"{name}.{field}", inst.StructType, zp, 1, scene.Name);
             }
+            foreach (var (name, info) in ctx.Symbols.StringVars)
+            {
+                if (name.StartsWith('_')) continue;
+                ctx.Debug.AddVariable(name, "string", info.ZpBase, info.Length, scene.Name);
+            }
         }
 
         foreach (var member in scene.Members)
