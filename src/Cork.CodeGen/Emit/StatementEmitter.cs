@@ -22,6 +22,10 @@ public sealed class StatementEmitter(EmitContext ctx)
 
     private void EmitStatementCore(StmtNode stmt)
     {
+        ctx.Debug?.AddStatement(
+            stmt.Location.FilePath, stmt.Location.Line, stmt.Location.Column,
+            ctx.Buffer.CurrentAddress);
+
         switch (stmt)
         {
             case VarDeclStmt varDecl: EmitVarDecl(varDecl); break;

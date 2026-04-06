@@ -18,6 +18,7 @@ public sealed class SceneEmitter(EmitContext ctx)
         _currentSceneName = scene.Name;
 
         ctx.Buffer.DefineLabel($"_scene_{scene.Name}");
+        ctx.Debug?.OpenScope(ctx.Debug.Scenes, scene.Name, ctx.Buffer.CurrentAddress);
 
         var sceneVarNames = new HashSet<string>();
         foreach (var member in scene.Members)
@@ -58,6 +59,28 @@ public sealed class SceneEmitter(EmitContext ctx)
             if (member is SpriteBlockNode sprite)
                 EmitSpriteBlock(sprite);
 
+        // Capture scene-local variables for debug info
+        if (ctx.Debug != null)
+        {
+            foreach (var (name, zp) in ctx.Symbols.Locals)
+            {
+                if (name.StartsWith('_')) continue; // skip internal vars
+                var type = ctx.Symbols.GetVarType(name) ?? "byte";
+                var size = SymbolTable.Is16BitType(type) ? 2 : 1;
+                ctx.Debug.AddVariable(name, type, zp, size, scene.Name);
+            }
+            foreach (var (name, inst) in ctx.Symbols.StructInstances)
+            {
+                foreach (var (field, zp) in inst.Fields)
+                    ctx.Debug.AddVariable($"{name}.{field}", inst.StructType, zp, 1, scene.Name);
+            }
+            foreach (var (name, info) in ctx.Symbols.StringVars)
+            {
+                if (name.StartsWith('_')) continue;
+                ctx.Debug.AddVariable(name, "string", info.ZpBase, info.Length, scene.Name);
+            }
+        }
+
         foreach (var member in scene.Members)
             if (member is EnterBlockNode enter)
                 ctx.Statements.EmitBlock(enter.Body);
@@ -90,6 +113,8 @@ public sealed class SceneEmitter(EmitContext ctx)
 
         if (rasterBlocks.Count > 0)
             EmitRasterHandler(rasterBlocks, scene.Name);
+
+        ctx.Debug?.CloseScope(ctx.Debug.Scenes, scene.Name, ctx.Buffer.CurrentAddress);
     }
 
     public void EmitHardwareBlock(HardwareBlockNode hw)
@@ -415,8 +440,10 @@ public sealed class SceneEmitter(EmitContext ctx)
     {
         var label = $"_method_{method.SelectorName}";
         ctx.Buffer.DefineLabel(label);
+        ctx.Debug?.OpenScope(ctx.Debug.Methods, method.SelectorName, ctx.Buffer.CurrentAddress);
         ctx.Statements.EmitBlock(method.Body);
         ctx.Buffer.EmitRts();
+        ctx.Debug?.CloseScope(ctx.Debug.Methods, method.SelectorName, ctx.Buffer.CurrentAddress);
     }
 
     public void EmitVsyncWait()
