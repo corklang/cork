@@ -512,7 +512,7 @@ public sealed class SceneEmitter(EmitContext ctx)
 
     public void EmitPendingStructMethods(SceneNode scene)
     {
-        foreach (var (instanceName, inst) in ctx.Symbols.StructInstances)
+        foreach (var (instanceName, inst) in ctx.Symbols.StructInstances.ToList())
         {
             if (!ctx.Symbols.TryGetStructType(inst.StructType, out var structType)) continue;
 
@@ -531,8 +531,24 @@ public sealed class SceneEmitter(EmitContext ctx)
                     ctx.Symbols.SetLocal(fieldName, zpAddr);
                 }
 
+                // Register nested struct instances with bare names so pos.y resolves
+                var nestedInstances = new List<string>();
+                foreach (var field in structType.Fields)
+                {
+                    if (ctx.Symbols.TryGetStructType(field.TypeName, out _) &&
+                        ctx.Symbols.TryGetStructInstance($"{instanceName}.{field.Name}", out var nestedInst))
+                    {
+                        ctx.Symbols.RegisterStructInstance(field.Name, nestedInst.StructType, nestedInst.Fields);
+                        nestedInstances.Add(field.Name);
+                    }
+                }
+
                 ctx.Statements.EmitBlock(method.Body);
                 ctx.Buffer.EmitRts();
+
+                // Remove temporary nested instance registrations
+                foreach (var name in nestedInstances)
+                    ctx.Symbols.RemoveStructInstance(name);
 
                 foreach (var (fieldName, _) in inst.Fields)
                 {

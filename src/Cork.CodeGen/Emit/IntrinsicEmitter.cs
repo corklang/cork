@@ -158,6 +158,14 @@ public sealed class IntrinsicEmitter(EmitContext ctx)
                             ctx.Buffer.EmitLdaZeroPage((byte)(srcZp + 1));
                             ctx.Buffer.EmitStaZeroPage((byte)(wordZp + 1));
                         }
+                        else if (ctx.Expressions.TryFoldConstant(arg, out var folded))
+                        {
+                            var val = (ushort)(folded & 0xFFFF);
+                            ctx.Buffer.EmitLdaImmediate((byte)(val & 0xFF));
+                            ctx.Buffer.EmitStaZeroPage(wordZp);
+                            ctx.Buffer.EmitLdaImmediate((byte)(val >> 8));
+                            ctx.Buffer.EmitStaZeroPage((byte)(wordZp + 1));
+                        }
                         else
                         {
                             var val = ExpressionEmitter.Resolve16BitInitializer(param.TypeName, arg);

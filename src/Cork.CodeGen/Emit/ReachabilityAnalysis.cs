@@ -43,6 +43,12 @@ public static class ReachabilityAnalysis
         // Collect all references from scene code (methods + identifiers)
         CollectMethodCalls(program, methods, identifiers);
 
+        // Walk struct method bodies for references they make
+        foreach (var decl in program.Declarations)
+            if (decl is StructDeclNode structDecl)
+                foreach (var method in structDecl.Methods)
+                    CollectFromBlock(method.Body, methods, identifiers);
+
         // Transitive closure: walk called methods for more calls
         var processed = new HashSet<string>();
         var queue = new Queue<string>(methods);

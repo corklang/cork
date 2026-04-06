@@ -3,6 +3,8 @@
 ##
 ## Get latest from `dotnet new gitignore`
 # Cork compiler output
+*.prg
+!tests/Cork.Integration.Tests/Baselines/*.prg
 *.cork-debug
 *.mon
 
