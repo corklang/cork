@@ -19,4 +19,4 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: dotnet build Cork.slnx /p:Version=$VERSION
-      - run: dotnet test --solution Cork.slnx --ignore-exit-code 8 /p:Version=$VERSION
+      - run: dotnet test --solution Cork.slnx /p:Version=$VERSION
