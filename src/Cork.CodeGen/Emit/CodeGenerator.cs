@@ -355,12 +355,15 @@ public sealed class CodeGenerator(ushort codeBase = 0x0810)
         var gmStartMarker = ctx.Buffer.EmitDebugMarker();
         ctx.Debug?.OpenScope(ctx.Debug.Methods, gm.SelectorName, gmStartMarker);
         // Each method gets its own non-overlapping local zone so nested calls work.
-        ctx.Symbols.PrepareMethodLocals();
+        var localsBase = ctx.Symbols.PrepareMethodLocals();
         ctx.Symbols.InstallMethodParamLocals(gm.SelectorName, gm.Parameters);
         var prevMethod = ctx.ActiveMethodSelector;
+        var prevLocalsBase = ctx.ActiveMethodLocalsBase;
         ctx.ActiveMethodSelector = gm.SelectorName;
+        ctx.ActiveMethodLocalsBase = localsBase;
         ctx.Statements.EmitBlock(gm.Body);
         ctx.ActiveMethodSelector = prevMethod;
+        ctx.ActiveMethodLocalsBase = prevLocalsBase;
         ctx.Symbols.RemoveMethodParamLocals(gm.Parameters);
         ctx.Symbols.FinalizeMethodLocals();
         ctx.Buffer.EmitRts();

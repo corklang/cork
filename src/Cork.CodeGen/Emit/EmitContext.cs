@@ -133,6 +133,8 @@ public sealed class EmitContext
 
     // Active method selector (set during method body emission for caller-save param protection)
     public string? ActiveMethodSelector { get; set; }
+    // Active method locals base ZP address (for caller-save of locals at call sites)
+    public byte ActiveMethodLocalsBase { get; set; }
 
     // Current scene's graphics mode (set during hardware block emission)
     public bool IsBitmapMode { get; set; }
