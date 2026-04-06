@@ -51,7 +51,7 @@ public sealed class DebugInfo
     public string ToViceMonCommands()
     {
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("# Cork debug symbols");
+        sb.AppendLine("; Cork debug symbols");
         sb.AppendLine();
 
         foreach (var s in Scenes)
