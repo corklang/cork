@@ -23,6 +23,10 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 ctx.Buffer.EmitLdaImmediate((byte)intLit.Value);
                 break;
 
+            case BoolLiteralExpr boolLit:
+                ctx.Buffer.EmitLdaImmediate(boolLit.Value ? (byte)1 : (byte)0);
+                break;
+
             case UnaryExpr { Op: TokenKind.Minus } neg when neg.Operand is IntLiteralExpr negInt:
                 ctx.Buffer.EmitLdaImmediate((byte)(-negInt.Value & 0xFF));
                 break;
@@ -56,7 +60,16 @@ public sealed class ExpressionEmitter(EmitContext ctx)
                 else if (ctx.Symbols.TryGetConstant(ident.Name, out var constVal))
                     ctx.Buffer.EmitLdaImmediate((byte)constVal);
                 else if (ctx.Symbols.IsWordVar(ident.Name))
-                    ctx.Buffer.EmitLdaZeroPage((byte)(ctx.Symbols.GetLocal(ident.Name) + 1));
+                {
+                    var zpBase = ctx.Symbols.GetLocal(ident.Name);
+                    var varType = ctx.Symbols.GetVarType(ident.Name);
+                    // fixed/sfixed: high byte is the integer part (for poke, etc.)
+                    // word/sword: low byte is the natural truncation
+                    if (varType is "fixed" or "sfixed")
+                        ctx.Buffer.EmitLdaZeroPage((byte)(zpBase + 1));
+                    else
+                        ctx.Buffer.EmitLdaZeroPage(zpBase);
+                }
                 else
                     ctx.Buffer.EmitLdaZeroPage(ctx.Symbols.GetLocal(ident.Name));
                 break;
@@ -474,6 +487,55 @@ public sealed class ExpressionEmitter(EmitContext ctx)
             var raw = (int)(-negFix.Value * 256);
             return (ushort)(raw & 0xFFFF);
         }
+        if (init is BinaryExpr bin &&
+            TryFoldConstantStatic(bin, out var folded))
+        {
+            return (ushort)(folded & 0xFFFF);
+        }
+        if (init is UnaryExpr { Op: TokenKind.Minus } negExpr &&
+            TryFoldConstantStatic(negExpr, out var negFolded))
+        {
+            return (ushort)(negFolded & 0xFFFF);
+        }
         return 0;
+    }
+
+    /// <summary>
+    /// Static constant folding for use in contexts without an EmitContext.
+    /// Handles literals and binary/unary arithmetic on literals.
+    /// </summary>
+    private static bool TryFoldConstantStatic(ExprNode expr, out long result)
+    {
+        result = 0;
+        switch (expr)
+        {
+            case IntLiteralExpr intLit:
+                result = intLit.Value;
+                return true;
+            case BinaryExpr bin when TryFoldConstantStatic(bin.Left, out var left) &&
+                                     TryFoldConstantStatic(bin.Right, out var right):
+                result = bin.Op switch
+                {
+                    TokenKind.Plus => left + right,
+                    TokenKind.Minus => left - right,
+                    TokenKind.Star => left * right,
+                    TokenKind.Slash when right != 0 => left / right,
+                    TokenKind.Percent when right != 0 => left % right,
+                    TokenKind.Ampersand => left & right,
+                    TokenKind.Pipe => left | right,
+                    TokenKind.Caret => left ^ right,
+                    TokenKind.ShiftLeft => left << (int)right,
+                    TokenKind.ShiftRight => left >> (int)right,
+                    _ => 0
+                };
+                return bin.Op is TokenKind.Plus or TokenKind.Minus or TokenKind.Star or
+                    TokenKind.Slash or TokenKind.Percent or TokenKind.Ampersand or
+                    TokenKind.Pipe or TokenKind.Caret or TokenKind.ShiftLeft or TokenKind.ShiftRight;
+            case UnaryExpr { Op: TokenKind.Minus } neg when TryFoldConstantStatic(neg.Operand, out var inner):
+                result = -inner;
+                return true;
+            default:
+                return false;
+        }
     }
 }

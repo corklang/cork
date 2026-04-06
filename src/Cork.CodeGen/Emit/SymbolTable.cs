@@ -239,6 +239,9 @@ public sealed class SymbolTable
     public bool TryGetStructInstance(string name, out (string StructType, Dictionary<string, byte> Fields) instance) =>
         _structInstances.TryGetValue(name, out instance);
 
+    public void RemoveStructInstance(string name) =>
+        _structInstances.Remove(name);
+
     public IEnumerable<KeyValuePair<string, (string StructType, Dictionary<string, byte> Fields)>> StructInstances =>
         _structInstances;
 

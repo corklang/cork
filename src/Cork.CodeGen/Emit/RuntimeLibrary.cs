@@ -110,8 +110,10 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         // 16×8 unsigned multiply: ZpFixedArg1(lo/hi) × ZpMulB → result in ZpFixedArg1(lo/hi)
         // Uses two 8×8 multiplies: (lo × B) + (hi × B) << 8
         ctx.Buffer.DefineLabel("_rt_mul16x8");
-        // Save high byte
+        // Save high byte and multiplier (mul8x8 destroys ZpMulB)
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Hi);
+        ctx.Buffer.EmitPha();
+        ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulB);
         ctx.Buffer.EmitPha();
         // lo × B
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpFixedArg1Lo);
@@ -122,7 +124,9 @@ public sealed class RuntimeLibrary(EmitContext ctx)
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Lo); // result lo
         ctx.Buffer.EmitLdaZeroPage(EmitContext.ZpMulResultHi);
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpFixedArg1Hi); // partial result hi
-        // hi × B (only need low byte since hi byte would overflow 16 bits)
+        // hi × B (restore multiplier, then original hi)
+        ctx.Buffer.EmitPla(); // restore multiplier
+        ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulB);
         ctx.Buffer.EmitPla(); // restore original hi
         ctx.Buffer.EmitStaZeroPage(EmitContext.ZpMulA);
         ctx.Buffer.EmitJsrForward("_rt_mul8x8");

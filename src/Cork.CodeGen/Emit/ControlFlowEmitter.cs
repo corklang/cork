@@ -448,6 +448,14 @@ public sealed class ControlFlowEmitter(EmitContext ctx)
             return;
         }
 
+        // Bare identifier as condition: if (myVar) — treat non-zero as true
+        if (condition is IdentifierExpr bareIdent)
+        {
+            ctx.Expressions.EmitExprToA(bareIdent);
+            ctx.Buffer.EmitBeq((sbyte)skipBytes);
+            return;
+        }
+
         throw new InvalidOperationException($"Unsupported condition: {condition.GetType().Name}");
     }
 
