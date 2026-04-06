@@ -274,6 +274,12 @@ Installed automatically with `brew install corklang/tap/corklang`. Modules avail
 | `random` | Random number generation |
 | `memory` | Memory utilities |
 
+To use a local stdlib (for development or custom modules), set `CORK_STDLIB` to the directory containing your `stdlib/` folder:
+
+```bash
+CORK_STDLIB=. cork myfile.cork
+```
+
 ---
 
 ## What Cork Does NOT Have
